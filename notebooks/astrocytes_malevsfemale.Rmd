@@ -52,6 +52,7 @@ astro_raw_data <- read_tsv(file = '../data/combined_protein_astrocytes_sex_time.
 nrow(astro_raw_data)
 #meta data
 astro_meta_data <- read_tsv(file = '../data/experiment_annotation_astrocytes_sex_time.tsv')
+
 astro_meta_data$sex <- c("F", "F", "F", "F", "F", "F", "M", "M", "M", "M", "M", "M")
 astro_meta_data$time <- c("T33", "T33", "T33", "T37", "T37", "T37", "T33", "T33", "T33", "T37", "T37", "T37")
 female_meta_data <- astro_meta_data[1:6, ]
