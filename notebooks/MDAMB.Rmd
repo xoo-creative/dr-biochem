@@ -1,0 +1,262 @@
+---
+title: "MDAMB"
+author: "Lucy"
+date: "2023-11-05"
+output: html_document
+---
+
+
+## load libraries
+```{r}
+library(readr)
+library(knitr)
+library(tidyverse)
+library(GEOquery)
+library(limma)
+library(statmod)
+library(ggplot2)
+library(datawizard)
+library(reshape2)
+library(ggplot2)
+library(ggfortify)
+```
+
+```{r}
+#protein data
+MDAMB_raw <- read_tsv(file = '../data/combined_protein_reMDAMB.tsv')
+
+#meta data
+MDAMB_meta_data <- read_tsv(file = '../data/experiment_annotation_reMDAMB.tsv')
+#MDAMB_meta_data = drop_na(MDAMB_meta_data)
+```
+
+
+```{r}
+#1. remove contamination
+MDAMB_remove_contam <- MDAMB_raw[- grep("contam_sp", MDAMB_raw$Protein),]
+
+#2. remove unnecessary columns
+MDAMB_shorten <- select(MDAMB_remove_contam, Protein, "Protein ID", "Entry Name", Description, contains("MaxLFQ Intensity"))
+MDAMB_shorten[MDAMB_shorten == 0] <- NA
+
+#3. log transformation
+
+MADMB_numeric <- MDAMB_shorten %>% select(contains("MaxLFQ Intensity"))
+rownames(MADMB_numeric) <- MDAMB_shorten$Protein
+MADMB_logged <- log2(MADMB_numeric)
+rownames(MADMB_logged) <- MDAMB_shorten$Protein
+
+
+# #4. remove lowly expressed proteins
+# 
+# #make a new column counting the number of "NA" values
+# count <- rowSums(is.na(MADMB_logged))
+# data.log.filt <- data.frame(cbind(MADMB_logged, "Count" = count))
+# 
+# #Adjust the threshold at your discretion. 
+# #Here, I am allowing up to 75% of protein observations to be "NA"
+# data.log.filt <- subset(data.log.filt, Count < ncol(MADMB_logged)*0.75)
+# data.log.filt <- subset(data.log.filt, select = -c(Count)) #Remove count variable
+```
+
+## Without Log transform (For PCA)
+```{r}
+count <- rowSums(is.na(MADMB_numeric))
+data.filt <- data.frame(cbind(MADMB_numeric, "Count" = count))
+
+data.filt <- subset(data.filt, Count < ncol(MADMB_numeric)*0.75)
+data.filt <- subset(data.filt, select = -c(Count))
+
+```
+
+```{r}
+
+data.filt.pca <- t(data.filt) %>% as.data.frame()
+
+## replace NA with 0 because that should mean 0 spectral count
+data.filt.pca[is.na(data.filt.pca)] <- 0
+
+## A way you can check which column has all the same values (if any)
+# which(apply(data.filt.pca, 2, var)==0)
+
+# data.filt.pca = data.filt.pca %>% select(-c(rowname))
+
+data.filt.pca %>% head()
+
+p <- prcomp(data.filt.pca, scale = TRUE)
+
+data.filt.pca = rownames_to_column(data.filt.pca)
+data.filt.pca$condition = c("control231", "control231", "control231", "control468", "control468", "control468", "control468_42hr", "control468_42hr", "control468_42hr", "drug231", "drug231", "drug231", "drug468", "drug468", "drug468", "drug468_42hr", "drug468_42hr", "drug468_42hr", "M3_33C", "M1_37C", "M2_37C", "M3_37C")
+#data.filt.pca$hpi = data.filt.pca$hpi %>%  as.character()   # this makes the colour scale not an idiot
+
+autoplot(p, data=data.filt.pca, colour = "condition")
+
+```
+
+
+###quality control
+```{r}
+#histogram
+
+# first, transpose data to standardize by protein
+# (by default, the standardize() function will calculate z scores by column,
+# so we want our proteins as columns now
+data.t <- data.frame(t(data.filt))
+data.t.z <- standardize(data.t)
+
+# Now, we need the data in long-form (melted) for making the heatmap.
+# we want to bind the sample metadata to this matrix ahead of melting
+# First make sure the protein data and the metadata are ordered the same
+rownames(data.t.z)==astro_meta_data$sample #check
+
+# The order is not the same. Order both objects and try again
+meta_data.order <- meta_data[order(meta_data$sample),]
+
+#I am sure you could order the rownames directly too, but here I move the sample names into a column, order it, and move it back to rownames
+data.t.z <- rownames_to_column(data.t.z) 
+data.t.z <- data.t.z[order(data.t.z$rowname),]
+rownames(data.t.z) <- NULL #uninitialize rownames to accept new names
+data.t.z <- column_to_rownames(data.t.z, var = "rowname")
+rownames(data.t.z) == astro_meta_data$sample #Success!
+
+#now that it's ordered, bind metadata variables to protein data
+data.t.z <- data.frame(cbind(data.t.z, astro_meta_data))
+
+#define vector for id.vars
+vars <- colnames(astro_meta_data)
+data.t.z.melt <- melt(data.t.z, id.vars = vars, value.name = "Z.score", variable.name = "Protein")
+head(data.t.z.melt)
+
+ggplot(data.t.z.melt, aes(x = condition, y = Protein, fill = Z.score)) +
+  geom_tile()+
+  scale_fill_gradient2(low = "#0571b0", mid = "white", high = "#ca0020",
+                       name = "Z score", limits = c(-4,4),na.value = "grey")+
+  theme_bw()+
+  theme(axis.text.y = element_blank(),
+        axis.text.x = element_text(angle = -50, hjust = 0, size = 6, color = "black"),
+        plot.background = element_blank(),
+        axis.title.x = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.background = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "top")+
+  scale_y_discrete(expand = c(0,0)) + 
+  scale_x_discrete(expand = c(0,0))  
+
+#data look uniform without major outliers
+
+```
+
+
+
+
+
+```{r}
+#histogram
+count <- rowSums(is.na(MDAMB_numeric))
+data.filt <- data.frame(cbind(infec_data_numeric, "Count" = count))
+
+data.filt <- subset(data.filt, Count < ncol(infec_data_numeric)*0.75)
+data.filt <- subset(data.filt, select = -c(Count))
+# first, transpose data to standardize by protein
+# (by default, the standardize() function will calculate z scores by column,
+# so we want our proteins as columns now
+data.t <- data.frame(t(data.filt))
+data.t.z <- standardize(data.t)
+
+# Now, we need the data in long-form (melted) for making the heatmap.
+# we want to bind the sample metadata to this matrix ahead of melting
+# First make sure the protein data and the metadata are ordered the same
+rownames(data.t.z)==meta_data$sample #check
+
+# The order is not the same. Order both objects and try again
+meta_data.order <- meta_data[order(meta_data$sample),]
+
+#I am sure you could order the rownames directly too, but here I move the sample names into a column, order it, and move it back to rownames
+data.t.z <- rownames_to_column(data.t.z) 
+data.t.z <- data.t.z[order(data.t.z$rowname),]
+rownames(data.t.z) <- NULL #uninitialize rownames to accept new names
+data.t.z <- column_to_rownames(data.t.z, var = "rowname")
+rownames(data.t.z) == meta_data.order$sample #Success!
+
+#now that it's ordered, bind metadata variables to protein data
+data.t.z <- data.frame(cbind(data.t.z, meta_data.order))
+
+#define vector for id.vars
+vars <- colnames(meta_data.order)
+data.t.z.melt <- melt(data.t.z, id.vars = vars, value.name = "Z.score", variable.name = "Protein")
+head(data.t.z.melt)
+
+ggplot(data.t.z.melt, aes(x = condition, y = Protein, fill = Z.score)) +
+  geom_tile()+
+  scale_fill_gradient2(low = "#0571b0", mid = "white", high = "#ca0020",
+                       name = "Z score", limits = c(-4,4),na.value = "grey")+
+  theme_bw()+
+  theme(axis.text.y = element_blank(),
+        axis.text.x = element_text(angle = -50, hjust = 0, size = 6, color = "black"),
+        plot.background = element_blank(),
+        axis.title.x = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.background = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "top")+
+  scale_y_discrete(expand = c(0,0)) + 
+  scale_x_discrete(expand = c(0,0))  
+
+#data look uniform without major outliers
+```
+
+
+```{r}
+## Testing metadata
+test_meta <- read_tsv("../data/experiment_annotation.tsv")
+colnames(data.log.filt) == MDAMB_meta_data$sample_name #if false, order them
+
+desMat <- model.matrix(~ drug * cell_type, MDAMB_meta_data)
+
+solve(crossprod(desMat))
+
+y <- rnorm(36)
+summary(lm(y ~ 0 + desMat))
+fit <- lmFit(data.log.filt, desMat)
+
+data.log.filt["sp|O15498|YKT6_HUMAN",]
+
+test_data_log_filt <- data.log.filt
+
+
+test_data_log_filt[is.na(test_data_log_filt)] <- 1
+```
+
+
+##limma
+```{r}
+# colnames(data.filt) == meta_data.order$sample #if false, order them
+colnames(data.log.filt) == MDAMB_meta_data$sample_name #if false, order them
+length(colnames(data.log.filt))
+length(MDAMB_meta_data$sample_name)
+
+## temporary solution for "Coefficients are not estimable"
+test_data_log_filt[is.na(test_data_log_filt)] <- 1
+
+desMat <- model.matrix(~ drug  * condition , MDAMB_meta_data)
+
+
+
+#Call limma
+fit <- lmFit(test_data_log_filt, desMat)
+colnames(fit)
+
+tmp <- eBayes(fit)
+topTable(tmp, coef = "drugYES:cell_typeKO" )
+
+limma.results <- topTable(tmp, n = Inf)
+sig.prots <- subset(limma.results, adj.P.Val < 0.05)
+head(sig.prots)
+
+head(coef(fit))
+
+```
+
