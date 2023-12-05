@@ -86,7 +86,7 @@ data.filt.pca %>% head()
 p <- prcomp(data.filt.pca, scale = TRUE)
 
 data.filt.pca = rownames_to_column(data.filt.pca)
-data.filt.pca$condition = c("control231", "control231", "control231", "control468", "control468", "control468", "control468_42hr", "control468_42hr", "control468_42hr", "drug231", "drug231", "drug231", "drug468", "drug468", "drug468", "drug468_42hr", "drug468_42hr", "drug468_42hr", "M3_33C", "M1_37C", "M2_37C", "M3_37C")
+data.filt.pca$condition = c("control231", "control231", "control231", "control468", "control468", "control468", "control468_42hr", "control468_42hr", "control468_42hr", "drug231", "drug231", "drug231", "drug468", "drug468", "drug468", "drug468_42hr", "drug468_42hr", "drug468_42hr", "high231", "high231", "high231", "high_drug231", "high_drug231", "high_drug231", "low468","low468", "low468", "low468_42hr", "low468_42hr", "low468_42hr", "low_drug468","low_drug468", "low_drug468", "low_drug468_42hr", "low_drug468_42hr", "low_drug468_42hr")
 #data.filt.pca$hpi = data.filt.pca$hpi %>%  as.character()   # this makes the colour scale not an idiot
 
 autoplot(p, data=data.filt.pca, colour = "condition")
