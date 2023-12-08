@@ -91,7 +91,7 @@ logged_data <- log2(numeric_MaxLFQ_data)
 rownames(logged_data) <- shorten_data$Protein
 
 female_logged_data <- select(logged_data, contains("female"))
-female_logged_data$Description = shorten_data$Description
+#female_logged_data$Description = shorten_data$Description
 #column_to_rownames(female_logged_data, "Description")
 rownames(female_logged_data) <- shorten_data$Protein
 
@@ -142,7 +142,7 @@ data.filt.pca %>% head()
 p <- prcomp(data.filt.pca, scale = TRUE)
 
 data.filt.pca = rownames_to_column(data.filt.pca)
-data.filt.pca$condition = c("F1_33C", "F2_33C", "F3_33C", "F1_37C", "F2_37C", "F3_37C", "M1_33C", "M2_33C", "M3_33C", "M1_37C", "M2_37C", "M3_37C")
+data.filt.pca$condition = c("F", "F", "F", "F", "F", "F", "M", "M", "M", "M", "M", "M")
 #data.filt.pca$hpi = data.filt.pca$hpi %>%  as.character()   # this makes the colour scale not an idiot
 
 autoplot(p, data=data.filt.pca, colour = "condition")
@@ -301,6 +301,7 @@ add_sig.prots <- topTable(int_tmp, coef = "sexM", n = Inf, p.value = 0.05)
 
 
 ## Split the Protein name by delimiter "|"
+T37_prots <- rownames_to_column(T37_prots, "Protein")
 T37_prots <- separate_wider_delim(T37_prots, cols=Protein, delim = "|", names = c("first", "second", "third"))
 T37_prots <- separate_wider_delim(T37_prots, cols = third, delim = "_", names= c("name", "human"))
 T37_prots <- T37_prots %>% select(-c("first", "second", "human"))
@@ -312,8 +313,6 @@ T37_prots$diffexpressed[T37_prots$logFC > 0 & T37_prots$adj.P.Val < 0.05] <- "UP
 # if log2Foldchange < -0.6 and pvalue < 0.05, set as "DOWN"
 T37_prots$diffexpressed[T37_prots$logFC < 0 & T37_prots$adj.P.Val < 0.05] <- "DOWN"
 
-# protein labels
-# T37_prots <- rownames_to_column(T37_prots, "Protein")
 
 T37_prots$delabel <- NA
 T37_prots$delabel[T37_prots$diffexpressed != "NO"] <- T37_prots$name[T37_prots$diffexpressed != "NO"]
