@@ -1,0 +1,204 @@
+---
+---
+---
+
+# Using DEP for Volcano Plots
+
+```{r}
+library("DEP")
+library("dplyr")
+library(readr)
+library(tidyverse)
+library(glue)
+```
+
+## Your Files
+
+Make sure both your `combined_proteins` and `experiment_annotations` files are placed in the `data` folder. Once that's done, you can just paste in the **file names** into the two variables below:
+
+```{r}
+combined_proteins_file="combined_protein_astrocytes_sex_time.tsv"
+experiment_annotation_file="experiment_annotation_astrocytes_sex_time.tsv"
+
+```
+
+## Reading data in
+
+```{r}
+proteins_raw <- read_tsv(file = paste0("../data/", combined_proteins_file)) |> as.data.frame()
+
+metadata_raw <- read_tsv(file = paste0("../data/", experiment_annotation_file)) |> as.data.frame()
+
+```
+
+## Data Formatting
+
+```{r}
+# Remove spaces from column names
+# "make.names" is a special function that formats all column names
+proteins_raw_renamed <- proteins_raw |> rename_with(make.names)
+
+# Remove Contamination
+proteins_raw_remove_contam <- proteins_raw_renamed |> filter(!grepl("contam", Protein))
+
+# Select the important columns
+proteins <- select(proteins_raw_remove_contam, Protein, Protein.ID, Entry.Name, Description, contains("MaxLFQ"))
+```
+
+## Changing Column Names to work with DEP
+
+Naturally, DEP expects the `combined_proteins.tsv` and `experiment_annotations.tsv` to be in the format of MaxQuant outputs. The main difference in data format is that MaxQuant has `"LFQ.intensity.CONDITION"`, while Fragpipe outputs `"CONDITION.MaxLFQ.Intensity"`.
+
+The following code changes all column names to match what `DEP` expects.
+
+#### Add on "LFQ.intensity" before the data columns
+
+```{r}
+# Select only the columns that contain "MaxLFQ" and
+#   add on "LFQ.intensity" using paste0
+colnames(proteins)[grep("MaxLFQ", colnames(proteins))] <- paste0("LFQ.intensity.", colnames(proteins)[grep("MaxLFQ", colnames(proteins))])
+
+colnames(proteins)
+```
+
+### Remove the `.MaxLFQ.Intensity` from the end
+
+```{r}
+# Replace it with "" (nothing)
+colnames(proteins) <- gsub(pattern =".MaxLFQ.Intensity", 
+                                       replace="",
+                                       colnames(proteins),
+                                       fixed = TRUE)
+
+colnames(proteins)
+```
+
+## Extract protein name from `Entry.Name`
+
+```{r}
+## Split the Protein name by delimiter "|"
+proteins <- separate_wider_delim(proteins, cols=Protein, delim = "|", names = c("first", "second", "third"))
+
+# Split again to remove the "HUMAN" part of "XXX_HUMAN"
+proteins <- separate_wider_delim(proteins, cols = third, delim = "_", names= c("name", "human"))
+
+# Remove other columns that we made during the process
+proteins <- proteins %>% select(-c("first", "second", "human"))
+```
+
+```{r}
+# Use DEP's function to prepare final version
+proteins_for_dep <- make_unique(proteins, 
+                                  names="name", 
+                                  ids="Protein.ID")
+```
+
+## Make SummarizedExperiment Object
+
+### Prepare LFQ Column Numbers for DEP
+
+```{r}
+# DEP needs the column numbers that actually have the LFQ intensities
+LFQ_columns <- grep("LFQ", colnames(proteins_for_dep))
+```
+
+### Prepare Metadata for DEP
+
+```{r}
+# Remove columns we don't need 
+metadata_for_dep = metadata_raw |> select(-c(file, sample))
+
+# Rename columns, since DEP is expecting only three columns:
+#  "label", "condition", "replicate"
+metadata_for_dep = metadata_for_dep |> rename("label" = "sample_name")
+```
+
+### Make the SummarizedExperiment Object
+
+```{r}
+# Use DEP to make a SummarizedExperiment (se) object
+data <- make_se(proteins_for_dep, LFQ_columns, metadata_for_dep)
+```
+
+## Visualizations of Data
+
+```{r}
+plot_frequency(data)
+```
+
+```{r}
+plot_numbers(data)
+```
+
+```{r}
+plot_coverage(data)
+```
+
+```{r}
+data_normalized <- normalize_vsn(data)
+```
+
+```{r}
+plot_normalization(data, data_normalized)
+```
+
+```{r}
+plot_missval(data)
+```
+
+```{r}
+data_imputed <- impute(data_normalized, fun = "MinProb", q = 0.01)
+plot_imputation(data_normalized, data_imputed)
+```
+
+## Differential Enrichment Analysis
+
+Contrasts need to be defined in the format of `CONDITION1_vs_CONDITION2` , and they need to match the name in the `condition` column in `metadata_for_dep`. For example, if you want to compare the condition `"control123"` with `"wildtype456"`, then the manual contrast will be `"control123_vs_wildtype456"`.
+
+```{r}
+# Manually define contrasts for the volcano plot
+data_contrasts <- test_diff(data_imputed, type = "manual", 
+                              test = c("female37_vs_male37",
+                                       "female33_vs_male33"))
+```
+
+## Make DEP object
+
+`alpha`: The threshold for the adjusted p-value. Here, a sample value of `0.05` is used.
+
+`lfc`: the threshold for the log2 fold change. Here, a sample value of `1.5` fold change (then logged)
+
+```{r}
+dep <- add_rejections(data_contrasts, alpha = 0.05, lfc = log2(1.5))
+```
+
+## Visualizations for DEP objects
+
+```{r}
+plot_pca(dep, x = 1, y = 2, n = 500, point_size = 4)
+```
+
+```{r}
+plot_cor(dep, significant = TRUE, lower = 0, upper = 1, pal = "Spectral", font_size = 4)
+```
+
+```{r}
+plot_heatmap(dep, type = "centered", kmeans = TRUE,  col_limit = 4,
+             show_row_names = FALSE, indicate = c("condition", "replicate"),
+             col_font_size = 6)
+```
+
+```{r}
+plot_heatmap(dep, type = "contrast", kmeans = TRUE, col_font_size = 5,
+             k = 6, col_limit = 10, show_row_names = FALSE)
+```
+
+### Volcano Plots for Contrasts
+
+```{r}
+plot_volcano(dep, contrast = "female37_vs_male37", label_size = 2, add_names = TRUE)
+```
+
+```{r}
+plot_volcano(dep, contrast = "female33_vs_male33", label_size = 2, add_names = TRUE)
+```
