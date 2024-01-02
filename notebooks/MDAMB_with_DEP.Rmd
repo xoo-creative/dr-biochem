@@ -175,6 +175,7 @@ plot_heatmap(dep, type = "contrast", kmeans = TRUE, col_font_size = 5,
 ```
 
 ### Volcano Plots for Contrasts
+#### Does genetic engineer affect the overall proteome changes in 468 and 231?
 
 ```{r}
 plot_volcano(dep, contrast = "control468_vs_low468", label_size = 2, add_names = TRUE)
@@ -183,3 +184,30 @@ plot_volcano(dep, contrast = "control468_vs_low468", label_size = 2, add_names =
 ```{r}
 plot_volcano(dep, contrast = "control231_vs_high231", label_size = 2, add_names = TRUE)
 ```
+
+```{r}
+plot_volcano(dep, contrast = "control231_vs_drug231", label_size = 2, add_names = TRUE)
+```
+
+```{r}
+plot_volcano(dep, contrast = "control468_vs_drug468", label_size = 2, add_names = TRUE)
+```
+
+```{r}
+plot_volcano(dep, contrast = "high231_vs_high_drug231", label_size = 2, add_names = TRUE)
+```
+
+```{r}
+plot_volcano(dep, contrast = "low468_vs_low_drug468", label_size = 2, add_names = TRUE)
+```
+
+#### Does the drug have a diffferent effect on control cell lines vs engineered cell lines?
+
+```{r}
+plot_volcano(dep, contrast = "drug468_vs_low_drug468", label_size = 2, add_names = TRUE)
+```
+
+```{r}
+plot_volcano(dep, contrast = "drug231_vs_high_drug231", label_size = 2, add_names = TRUE)
+```
+
