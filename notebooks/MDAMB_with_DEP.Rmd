@@ -140,7 +140,7 @@ Contrasts need to be defined in the format of `CONDITION1_vs_CONDITION2` , and t
 # Manually define contrasts for the volcano plot
 data_contrasts <- test_diff(data_imputed, type = "manual", 
                               test = c("control468_vs_low468",
-                                       "control231_vs_high231"))
+                                       "control231_vs_high231", "control468_vs_drug468", "control231_vs_drug231", "low468_vs_low_drug468", "high231_vs_high_drug231"))
 ```
 
 ## Make DEP object
@@ -164,7 +164,7 @@ plot_cor(dep, significant = TRUE, lower = 0, upper = 1, pal = "Spectral", font_s
 ```
 
 ```{r}
-plot_heatmap(dep, type = "centered", kmeans = TRUE,  col_limit = 4,
+plot_heatmap(dep, type = "centered",  col_limit = 4,
              show_row_names = FALSE, indicate = c("condition", "replicate"),
              col_font_size = 6)
 ```
@@ -182,4 +182,31 @@ plot_volcano(dep, contrast = "control468_vs_low468", label_size = 2, add_names =
 
 ```{r}
 plot_volcano(dep, contrast = "control231_vs_high231", label_size = 2, add_names = TRUE)
+```
+
+```{r}
+plot_volcano(dep, contrast = "control468_vs_drug468", label_size = 2, add_names = TRUE)
+```
+
+```{r}
+plot_volcano(dep, contrast = "control231_vs_drug231", label_size = 2, add_names = TRUE)
+```
+
+```{r}
+plot_volcano(dep, contrast = "low468_vs_low_drug468", label_size = 2, add_names = TRUE)
+```
+
+```{r}
+plot_volcano(dep, contrast = "high231_vs_high_drug231", label_size = 2, add_names = TRUE)
+```
+
+```{r}
+gsea_kegg_2021 = test_gsea(dep, databases = "KEGG_2016")
+plot_gsea(gsea_kegg_2021)
+```
+
+```{r}
+library(enrichR)
+dbs <- listEnrichrDbs()
+head(dbs)
 ```
