@@ -1,0 +1,7 @@
+file	sample	sample_name	condition	replicate
+D:\Data\Lucy\20231214_Arpa_PC12_10ng\Arpa_PC12_10ng_diff_day6_DDA_12-15-2023_Slot1-26_2713.d	PC12_day6_1_1	PC12_day6_1_1	day6	1
+D:\Data\Lucy\20231214_Arpa_PC12_10ng\Arpa_PC12_10ng_diff_day6_DDA_12-15-2023_Slot1-26_2714.d	PC12_day6_2_2	PC12_day6_2_2	day6	2
+D:\Data\Lucy\20231214_Arpa_PC12_10ng\Arpa_PC12_10ng_diff_day6_DDA_12-15-2023_Slot1-26_2715.d	PC12_day6_3_3	PC12_day6_3_3	day6	3
+D:\Data\Lucy\20231214_Arpa_PC12_10ng\Arpa_PC12_10ng_undiff_DDA_12-14-2023_Slot1-25_2707.d	PC12_undiff_1_1	PC12_undiff_1_1	control	1
+D:\Data\Lucy\20231214_Arpa_PC12_10ng\Arpa_PC12_10ng_undiff_DDA_12-14-2023_Slot1-25_2708.d	PC12_undiff_2_2	PC12_undiff_2_2	control	2
+D:\Data\Lucy\20231214_Arpa_PC12_10ng\Arpa_PC12_10ng_undiff_DDA_12-14-2023_Slot1-25_2709.d	PC12_undiff_3_3	PC12_undiff_3_3	control	3
