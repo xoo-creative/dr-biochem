@@ -139,8 +139,14 @@ Contrasts need to be defined in the format of `CONDITION1_vs_CONDITION2` , and t
 ```{r}
 # Manually define contrasts for the volcano plot
 data_contrasts <- test_diff(data_imputed, type = "manual", 
-                              test = c("control468_vs_low468",
-                                       "control231_vs_high231"))
+                              test = c("low468_vs_control468",
+                                       "high231_vs_control231",
+                                       "drug231_vs_control231",
+                                       "drug468_vs_control468",
+                                       "high_drug231_vs_high231",
+                                       "low_drug468_vs_low468",
+                                       "low_drug468_vs_drug468",
+                                       "high_drug231_vs_drug231"))
 ```
 
 ## Make DEP object
@@ -175,11 +181,39 @@ plot_heatmap(dep, type = "contrast", kmeans = TRUE, col_font_size = 5,
 ```
 
 ### Volcano Plots for Contrasts
+#### Does genetic engineer affect the overall proteome changes in 468 and 231?
 
 ```{r}
-plot_volcano(dep, contrast = "control468_vs_low468", label_size = 2, add_names = TRUE)
+plot_volcano(dep, contrast = "low468_vs_control468", label_size = 2, add_names = TRUE)
 ```
 
 ```{r}
-plot_volcano(dep, contrast = "control231_vs_high231", label_size = 2, add_names = TRUE)
+plot_volcano(dep, contrast = "high231_vs_control231", label_size = 2, add_names = TRUE)
 ```
+
+```{r}
+plot_volcano(dep, contrast = "drug231_vs_control231", label_size = 2, add_names = TRUE)
+```
+
+```{r}
+plot_volcano(dep, contrast = "drug468_vs_control468", label_size = 2, add_names = TRUE)
+```
+
+```{r}
+plot_volcano(dep, contrast = "high_drug231_vs_high231", label_size = 2, add_names = TRUE)
+```
+
+```{r}
+plot_volcano(dep, contrast = "low_drug468_vs_low468", label_size = 2, add_names = TRUE)
+```
+
+#### Does the drug have a diffferent effect on control cell lines vs engineered cell lines?
+
+```{r}
+plot_volcano(dep, contrast = "low_drug468_vs_drug468", label_size = 2, add_names = TRUE)
+```
+
+```{r}
+plot_volcano(dep, contrast = "high_drug231_vs_drug231", label_size = 2, add_names = TRUE)
+```
+

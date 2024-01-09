@@ -1,0 +1,109 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+### Load libraries
+
+```{r}
+library(tidyverse)
+library(stringr)
+```
+
+# Read in files: IMPORTANT: CHANGE THE FILE NAMES HERE EVERY TIME!!!
+
+```{r}
+## CHANGE HERE! JUST the file names
+control_filename = "control2.tsv"
+treatment_filename = "24hpii.tsv"
+```
+
+## THANK YOU FOR YOUR CONTRIBUTION. NO MORE CODING IS NECESSARY.
+
+## **Go to top right corner, "*Run*" -\> "*Restart R and Run All Chunks"***
+
+```{r}
+## DO NOT TOUCH: GENERATES THE SERIAL NUMBER AT THE END OF EACH OUTPUT
+
+runCountStoreFile = "runCount.txt"
+
+## Change the previous count into number, add one
+previousRunCount <- as.numeric(read_file(runCountStoreFile))
+currentRunCount <- previousRunCount + 1
+
+## Update the runCount file
+write_file(c(as.character(currentRunCount)), runCountStoreFile)
+```
+
+```{r}
+## The rest should fully run without humans
+baseline <- read_tsv(paste0("Data/", control_filename))
+treatment <- read_tsv(paste0("Data/", treatment_filename))
+# baseline2 <- read_tsv("Data/control2.tsv")
+# treatment24hpi <- read_tsv("Data/24hpii.tsv")
+
+print(paste0("Control has ", nrow(baseline), " rows;"))
+print(paste0("Treatment has ", nrow(treatment), " rows"))
+```
+
+### Remove contamination lists
+
+```{r}
+baseline_clean <- baseline |> filter(!str_detect(Protein, "^contam")) |> 
+                                filter(`Protein Description` != "polyprotein") |> 
+                                    select(Protein, "Protein ID", "Total Spectral Count")
+
+head(baseline_clean)
+print(paste("There are", nrow(baseline_clean), "rows in control data after removing contamination"))
+
+
+treatment_clean <- treatment |> filter(!str_detect(Protein, "^contam")) |> 
+                                filter(`Protein Description` != "polyprotein") |> 
+                                    select(Protein, "Protein ID", "Total Spectral Count")
+
+head(treatment_clean)
+print(paste("There are", nrow(treatment_clean), "rows in treatment data after removing contamination"))
+```
+
+### Make comparisons
+
+```{r}
+combined <- full_join(baseline_clean, treatment_clean, by= c("Protein", "Protein ID")) |> 
+                rename("Control" = "Total Spectral Count.x", "Treatment" = "Total Spectral Count.y")
+
+combined[is.na(combined)] <- 0
+combined <- combined |> mutate(
+        Difference = Treatment - Control
+    ) |> arrange(desc(abs(Difference)))
+head(combined)
+```
+
+### Plot
+
+```{r}
+
+M <- 100 #M is the top number of proteins with the largest difference 
+p <- ggplot(combined[1:M,], aes(x = `Protein ID`, y = Difference, label = `Protein ID`)) + geom_point() + labs(y = "Intensity Difference")
+p <- p + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size = 5)) +theme(aspect.ratio=2/5) + geom_text(check_overlap = TRUE, size = 2.5, vjust = 1.5)
+p
+```
+
+```{r}
+positive_diff <- combined |> arrange(desc(Difference))
+negative_diff <- combined |> arrange(Difference)
+
+## P defines how many *percent* of the proteins with most extreme intensity differences 
+##.   you want to export in the final file
+P <- 0.33
+
+N_positive = round(nrow(positive_diff) * P)
+N_negative = round(nrow(negative_diff) * P)
+
+write_csv(positive_diff[1:N_positive, ], 
+          paste0("output/positive_diff_proteins_", currentRunCount, ".csv"))
+
+write_csv(negative_diff[1:N_negative, ],
+          paste0("output/negative_diff_proteins_", currentRunCount, ".csv"))
+
+ggsave(paste0("output/proteinIntensityPlot_", currentRunCount, ".png"))
+```
