@@ -181,6 +181,7 @@ plot_heatmap(dep, type = "contrast", kmeans = TRUE, col_font_size = 5,
 ```
 
 ### Volcano Plots for Contrasts
+
 #### Does genetic engineer affect the overall proteome changes in 468 and 231?
 
 ```{r}
@@ -217,3 +218,29 @@ plot_volcano(dep, contrast = "low_drug468_vs_drug468", label_size = 2, add_names
 plot_volcano(dep, contrast = "high_drug231_vs_drug231", label_size = 2, add_names = TRUE)
 ```
 
+```{r}
+test_gsea(dep, databases = c("KEGG_2019_Human"))
+```
+
+```{r}
+result = test_gsea(dep, databases = "KEGG_2021_Human")
+```
+
+```{r}
+# NEED TO LOAD THIS LIBRARY FIRST
+library("enrichR")
+res <- listEnrichrDbs()
+```
+
+```{r}
+drug231_vs_control231_data = result |> filter(contrast == "drug231_vs_control231") |> filter(P.value < 0.05)
+```
+
+```{r}
+plotEnrich(drug231_vs_control231_data)
+```
+
+```{r}
+library(enrichplot)
+ridgeplot(drug231_vs_control231_data)
+```
