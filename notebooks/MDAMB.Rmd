@@ -51,7 +51,7 @@ rownames(MADMB_logged) <- MDAMB_shorten$Protein
 # 
 # #make a new column counting the number of "NA" values
 # count <- rowSums(is.na(MADMB_logged))
-# data.log.filt <- data.frame(cbind(MADMB_logged, "Count" = count))
+data.log.filt <- data.frame(cbind(MADMB_logged, "Count" = count))
 # 
 # #Adjust the threshold at your discretion. 
 # #Here, I am allowing up to 75% of protein observations to be "NA"
@@ -107,27 +107,27 @@ data.t.z <- standardize(data.t)
 # Now, we need the data in long-form (melted) for making the heatmap.
 # we want to bind the sample metadata to this matrix ahead of melting
 # First make sure the protein data and the metadata are ordered the same
-rownames(data.t.z)==astro_meta_data$sample #check
+rownames(data.t.z)==MDAMB_meta_data$sample #check
 
 # The order is not the same. Order both objects and try again
-meta_data.order <- meta_data[order(meta_data$sample),]
+meta_data.order <- MDAMB_meta_data[order(MDAMB_meta_data$sample),]
 
 #I am sure you could order the rownames directly too, but here I move the sample names into a column, order it, and move it back to rownames
 data.t.z <- rownames_to_column(data.t.z) 
 data.t.z <- data.t.z[order(data.t.z$rowname),]
 rownames(data.t.z) <- NULL #uninitialize rownames to accept new names
 data.t.z <- column_to_rownames(data.t.z, var = "rowname")
-rownames(data.t.z) == astro_meta_data$sample #Success!
+rownames(data.t.z) == MDAMB_meta_data$sample #Success!
 
 #now that it's ordered, bind metadata variables to protein data
-data.t.z <- data.frame(cbind(data.t.z, astro_meta_data))
+data.t.z <- data.frame(cbind(data.t.z, MDAMB_meta_data))
 
 #define vector for id.vars
-vars <- colnames(astro_meta_data)
+vars <- colnames(MDAMB_meta_data)
 data.t.z.melt <- melt(data.t.z, id.vars = vars, value.name = "Z.score", variable.name = "Protein")
 head(data.t.z.melt)
 
-ggplot(data.t.z.melt, aes(x = condition, y = Protein, fill = Z.score)) +
+ggplot(data.t.z.melt, aes(x = sample, y = Protein, fill = Z.score)) +
   geom_tile()+
   scale_fill_gradient2(low = "#0571b0", mid = "white", high = "#ca0020",
                        name = "Z score", limits = c(-4,4),na.value = "grey")+
@@ -149,64 +149,6 @@ ggplot(data.t.z.melt, aes(x = condition, y = Protein, fill = Z.score)) +
 ```
 
 
-
-
-
-```{r}
-#histogram
-count <- rowSums(is.na(MDAMB_numeric))
-data.filt <- data.frame(cbind(infec_data_numeric, "Count" = count))
-
-data.filt <- subset(data.filt, Count < ncol(infec_data_numeric)*0.75)
-data.filt <- subset(data.filt, select = -c(Count))
-# first, transpose data to standardize by protein
-# (by default, the standardize() function will calculate z scores by column,
-# so we want our proteins as columns now
-data.t <- data.frame(t(data.filt))
-data.t.z <- standardize(data.t)
-
-# Now, we need the data in long-form (melted) for making the heatmap.
-# we want to bind the sample metadata to this matrix ahead of melting
-# First make sure the protein data and the metadata are ordered the same
-rownames(data.t.z)==meta_data$sample #check
-
-# The order is not the same. Order both objects and try again
-meta_data.order <- meta_data[order(meta_data$sample),]
-
-#I am sure you could order the rownames directly too, but here I move the sample names into a column, order it, and move it back to rownames
-data.t.z <- rownames_to_column(data.t.z) 
-data.t.z <- data.t.z[order(data.t.z$rowname),]
-rownames(data.t.z) <- NULL #uninitialize rownames to accept new names
-data.t.z <- column_to_rownames(data.t.z, var = "rowname")
-rownames(data.t.z) == meta_data.order$sample #Success!
-
-#now that it's ordered, bind metadata variables to protein data
-data.t.z <- data.frame(cbind(data.t.z, meta_data.order))
-
-#define vector for id.vars
-vars <- colnames(meta_data.order)
-data.t.z.melt <- melt(data.t.z, id.vars = vars, value.name = "Z.score", variable.name = "Protein")
-head(data.t.z.melt)
-
-ggplot(data.t.z.melt, aes(x = condition, y = Protein, fill = Z.score)) +
-  geom_tile()+
-  scale_fill_gradient2(low = "#0571b0", mid = "white", high = "#ca0020",
-                       name = "Z score", limits = c(-4,4),na.value = "grey")+
-  theme_bw()+
-  theme(axis.text.y = element_blank(),
-        axis.text.x = element_text(angle = -50, hjust = 0, size = 6, color = "black"),
-        plot.background = element_blank(),
-        axis.title.x = element_blank(),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        strip.background = element_blank(),
-        axis.ticks.y = element_blank(),
-        legend.position = "top")+
-  scale_y_discrete(expand = c(0,0)) + 
-  scale_x_discrete(expand = c(0,0))  
-
-#data look uniform without major outliers
-```
 
 
 ```{r}
@@ -239,14 +181,14 @@ length(colnames(data.log.filt))
 length(MDAMB_meta_data$sample_name)
 
 ## temporary solution for "Coefficients are not estimable"
-test_data_log_filt[is.na(test_data_log_filt)] <- 1
+data.log.filt[is.na(data.log.filt)] <- 1
 
-desMat <- model.matrix(~ drug  * condition , MDAMB_meta_data)
+desMat <- model.matrix(~ condition , MDAMB_meta_data)
 
 
 
 #Call limma
-fit <- lmFit(test_data_log_filt, desMat)
+fit <- lmFit(data.log.filt, desMat)
 colnames(fit)
 
 tmp <- eBayes(fit)
