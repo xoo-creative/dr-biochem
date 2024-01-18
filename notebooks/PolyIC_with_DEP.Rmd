@@ -1,0 +1,278 @@
+---
+---
+---
+
+# Using DEP for Volcano Plots
+
+```{r}
+library("DEP")
+library("dplyr")
+library(readr)
+library(tidyverse)
+```
+
+## NOTE: THIS IS A TEMPLATE, DO NOT EDIT DIRECTLY. MAKE A COPY AND EDIT THAT ONE!
+
+## Your Files
+
+Make sure both your `combined_proteins` and `experiment_annotations` files are placed in the `data` folder. Once that's done, you can just paste in the **file names** into the two variables below:
+
+```{r}
+combined_proteins_file="INSRT_FILE_NAME_HERE"
+experiment_annotation_file="INSERT_FILE_NAME_HERE"
+
+## Example used in this file
+combined_proteins_file="combined_protein_polyIC_astrocytes.tsv"
+experiment_annotation_file="experiment_annotation_polyIC_astrocytes.tsv"
+
+```
+
+## Reading data in
+
+```{r}
+proteins_raw <- read_tsv(file = paste0("../data/", combined_proteins_file)) |> as.data.frame()
+
+metadata_raw <- read_tsv(file = paste0("../data/", experiment_annotation_file)) |> as.data.frame()
+
+```
+
+## Data Formatting
+
+```{r}
+# Remove spaces from column names
+# "make.names" is a special function that formats all column names
+proteins_raw_renamed <- proteins_raw |> rename_with(make.names)
+
+# Remove Contamination
+proteins_raw_remove_contam <- proteins_raw_renamed |> filter(!grepl("contam", Protein))
+
+# Select the important columns
+proteins <- select(proteins_raw_remove_contam, Protein, Protein.ID, Entry.Name, Description, contains("MaxLFQ"))
+```
+
+## Changing Column Names to work with DEP
+
+Naturally, DEP expects the `combined_proteins.tsv` and `experiment_annotations.tsv` to be in the format of MaxQuant outputs. The main difference in data format is that MaxQuant has `"LFQ.intensity.CONDITION"`, while Fragpipe outputs `"CONDITION.MaxLFQ.Intensity"`.
+
+The following code changes all column names to match what `DEP` expects.
+
+#### Add on "LFQ.intensity" before the data columns
+
+```{r}
+# Select only the columns that contain "MaxLFQ" and
+#   add on "LFQ.intensity" using paste0
+colnames(proteins)[grep("MaxLFQ", colnames(proteins))] <- paste0("LFQ.intensity.", colnames(proteins)[grep("MaxLFQ", colnames(proteins))])
+
+colnames(proteins)
+```
+
+### Remove the `.MaxLFQ.Intensity` from the end
+
+```{r}
+# Replace it with "" (nothing)
+colnames(proteins) <- gsub(pattern =".MaxLFQ.Intensity", 
+                                       replace="",
+                                       colnames(proteins),
+                                       fixed = TRUE)
+
+colnames(proteins)
+```
+
+## Extract protein name from `Entry.Name`
+
+```{r}
+## Split the Protein name by delimiter "|"
+proteins <- separate_wider_delim(proteins, cols=Protein, delim = "|", names = c("first", "second", "third"))
+
+# Split again to remove the "HUMAN" part of "XXX_HUMAN"
+proteins <- separate_wider_delim(proteins, cols = third, delim = "_", names= c("name", "human"))
+
+# Remove other columns that we made during the process
+proteins <- proteins %>% select(-c("first", "second", "human"))
+```
+
+```{r}
+# Use DEP's function to prepare final version
+proteins_for_dep <- make_unique(proteins, 
+                                  names="name", 
+                                  ids="Protein.ID")
+```
+
+## Make SummarizedExperiment Object
+
+### Prepare LFQ Column Numbers for DEP
+
+```{r}
+# DEP needs the column numbers that actually have the LFQ intensities
+LFQ_columns <- grep("LFQ", colnames(proteins_for_dep))
+```
+
+### Prepare Metadata for DEP
+
+```{r}
+# Remove columns we don't need 
+metadata_for_dep = metadata_raw |> select(-c(file, sample))
+
+# Rename columns, since DEP is expecting only three columns:
+#  "label", "condition", "replicate"
+metadata_for_dep = metadata_for_dep |> rename("label" = "sample_name")
+```
+
+### Make the SummarizedExperiment Object
+
+```{r}
+# Use DEP to make a SummarizedExperiment (se) object
+data <- make_se(proteins_for_dep, LFQ_columns, metadata_for_dep)
+```
+
+## Visualizations of Data
+
+```{r}
+plot_frequency(data)
+```
+
+```{r}
+plot_numbers(data)
+```
+
+```{r}
+plot_coverage(data)
+```
+
+```{r}
+data_normalized <- normalize_vsn(data)
+```
+
+```{r}
+plot_normalization(data, data_normalized)
+```
+
+```{r}
+# plot_missval(data)
+```
+
+```{r}
+data_imputed <- impute(data_normalized, fun = "MinProb", q = 0.01)
+plot_imputation(data_normalized, data_imputed)
+```
+
+## Differential Enrichment Analysis
+
+Contrasts need to be defined in the format of `CONDITION1_vs_CONDITION2` , and they need to match the name in the `condition` column in `metadata_for_dep`. For example, if you want to compare the condition `"control123"` with `"wildtype456"`, then the manual contrast will be `"control123_vs_wildtype456"`.
+
+```{r}
+# Manually define contrasts for the volcano plot
+
+data_contrasts <- test_diff(data_imputed, type = "manual", 
+                              test = c("m_10ug_vs_m_control",
+                                       "f_10ug_vs_f_control"))
+
+
+
+```
+
+```{r}
+  # # Test for differential expression by empirical Bayes moderation
+  # # of a linear model on the predefined contrasts
+  # library(limma)
+  # 
+  # raw <- SummarizedExperiment::assay(data_imputed)
+  # data_result = data_imputed
+  # 
+  # # test needs to have 'condition' smudged before each condition for som reason
+  # test = c("conditionm_10ug_vs_conditionm_control","conditionf_10ug_vs_conditionf_control")
+  # cntrst <- gsub("_vs_", " - ", test)
+  # design_formula = formula(~ 0 + condition)
+  # 
+  # design = model.matrix(~ 0 + condition, metadata_for_dep)
+  # 
+  # 
+  # fit <- lmFit(raw, design = design)
+  # made_contrasts <- makeContrasts(contrasts = cntrst, levels = design)
+  # contrast_fit <- contrasts.fit(fit, made_contrasts)
+  # 
+  # if(any(is.na(raw))) {
+  #   for(i in cntrst) {
+  #     covariates <- strsplit(i, " - ") %>% unlist
+  #     single_contrast <- makeContrasts(contrasts = i, levels = design[, covariates])
+  #     single_contrast_fit <- contrasts.fit(fit[, covariates], single_contrast)
+  #     contrast_fit$coefficients[, i] <- single_contrast_fit$coefficients[, 1]
+  #     contrast_fit$stdev.unscaled[, i] <- single_contrast_fit$stdev.unscaled[, 1]
+  #   }
+  # }
+  # 
+  # eB_fit <- eBayes(contrast_fit)
+  # 
+  # # function to retrieve the results of
+  # # the differential expression test using 'fdrtool'
+  # retrieve_fun <- function(comp, fit = eB_fit){
+  #   res <- topTable(fit, sort.by = "t", coef = comp,
+  #                   number = Inf, confint = TRUE)
+  #   res <- res[!is.na(res$t),]
+  #   fdr_res <- fdrtool::fdrtool(res$t, plot = FALSE, verbose = FALSE)
+  #   res$qval <- fdr_res$qval
+  #   res$lfdr <- fdr_res$lfdr
+  #   res$comparison <- rep(comp, dim(res)[1])
+  #   res <- rownames_to_column(res)
+  #   return(res)
+  # }
+  # 
+  # # Retrieve the differential expression test results
+  # limma_res <- map_df(cntrst, retrieve_fun)
+  # 
+  # # Select the logFC, CI and qval variables
+  # table <- limma_res %>%
+  #   select(rowname, logFC, CI.L, CI.R, P.Value, qval, comparison) %>%
+  #   mutate(comparison = gsub(" - ", "_vs_", comparison)) %>%
+  #   gather(variable, value, -c(rowname,comparison)) %>%
+  #   mutate(variable = recode(variable, logFC = "diff", P.Value = "p.val", qval = "p.adj")) %>%
+  #   unite(temp, comparison, variable) %>%
+  #   spread(temp, value)
+  # 
+  # SummarizedExperiment::rowData(data_result) <- merge(SummarizedExperiment::rowData(data_result, use.names = FALSE), table,
+  #   by.x = "name", by.y = "rowname", all.x = TRUE, sort=FALSE)
+  # 
+  # 
+  
+```
+
+## Make DEP object
+
+`alpha`: The threshold for the adjusted p-value. Here, a sample value of `0.05` is used.
+
+`lfc`: the threshold for the log2 fold change. Here, a sample value of `1.5` fold change (then logged)
+
+```{r}
+dep <- add_rejections(data_contrasts, alpha = 0.05, lfc = log2(1.5))
+```
+
+## Visualizations for DEP objects
+
+```{r}
+plot_pca(dep, x = 1, y = 2, n = 6243, point_size = 4)
+```
+
+```{r}
+plot_cor(dep, significant = TRUE, lower = 0, upper = 1, pal = "Spectral", font_size = 4)
+```
+
+```{r}
+plot_heatmap(dep, type = "centered", kmeans = TRUE,  col_limit = 4,
+             show_row_names = FALSE, indicate = c("condition", "replicate"),
+             col_font_size = 6)
+```
+
+```{r}
+plot_heatmap(dep, type = "contrast", kmeans = TRUE, col_font_size = 5,
+             k = 6, col_limit = 10, show_row_names = FALSE)
+```
+
+### Volcano Plots for Contrasts
+
+```{r}
+plot_volcano(dep, contrast = "m_10ug_vs_m_control", label_size = 2, add_names = TRUE)
+```
+
+```{r}
+plot_volcano(dep, contrast = "f_10ug_vs_f_control", label_size = 2, add_names = TRUE)
+```
