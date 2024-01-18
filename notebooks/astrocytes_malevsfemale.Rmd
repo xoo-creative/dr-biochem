@@ -57,7 +57,7 @@ astro_meta_data$sex <- c("F", "F", "F", "F", "F", "F", "M", "M", "M", "M", "M", 
 astro_meta_data$time <- c("T33", "T33", "T33", "T37", "T37", "T37", "T33", "T33", "T33", "T37", "T37", "T37")
 female_meta_data <- astro_meta_data[1:6, ]
 male_meta_data <- astro_meta_data[7:12, ]
-T37_meta_data <- astro_meta_data[c(4:6, 10:12), ]
+astro_meta_data <- astro_meta_data[c(4:6, 10:12), ]
 ```
 
 ###pre-process/cleaning data:
@@ -70,36 +70,39 @@ T37_meta_data <- astro_meta_data[c(4:6, 10:12), ]
 raw_data_wo_contam <- astro_raw_data[- grep("contam_sp", astro_raw_data$Protein),]
 
 #2. remove unnecessary columns
-shorten_data <- select(raw_data_wo_contam, Protein, "Protein ID", "Entry Name", Description, contains("MaxLFQ Intensity"))
-shorten_data[shorten_data == 0] <- NA
-
-
+data_shorten <- select(raw_data_wo_contam, Protein, "Protein ID", "Entry Name", Description, contains("MaxLFQ Intensity"))
+data_shorten[data_shorten == 0] <- NA
 
 #3. log transformation
 
-#this example shows that the data requires log transformation (not a bell shaped curve). 
-# six_hpi1 <- hist(infec_data_shorten$X215_LucyC_6hpi1_100ng_1.Total.Spectral.Count,
-# main="Protein Expression Histogram",
-# xlab="Expression",
-# xlim=c(0,100),
-# col="darkmagenta",
-# breaks = 1000)
-
-numeric_MaxLFQ_data <- shorten_data %>% select(contains("MaxLFQ Intensity"))
-rownames(numeric_MaxLFQ_data) <- shorten_data$Protein
+numeric_MaxLFQ_data <- data_shorten %>% select(contains("MaxLFQ Intensity"))
+rownames(numeric_MaxLFQ_data) <- data_shorten$Protein
 logged_data <- log2(numeric_MaxLFQ_data)
-rownames(logged_data) <- shorten_data$Protein
+rownames(logged_data) <- data_shorten$Protein
 
 female_logged_data <- select(logged_data, contains("female"))
-female_logged_data$Description = shorten_data$Description
+female_logged_data$Description = data_shorten$Description
 #column_to_rownames(female_logged_data, "Description")
-rownames(female_logged_data) <- shorten_data$Protein
+rownames(female_logged_data) <- data_shorten$Protein
 
 male_logged_data <- logged_data[ , 7:12]
-rownames(male_logged_data) <- shorten_data$Protein
+rownames(male_logged_data) <- data_shorten$Protein
 
-T37_logged_data <- logged_data[ , c(4:6, 10:12)]
-rownames(T37_logged_data) <- shorten_data$Protein
+astro_data <- logged_data[ , c(4:6, 10:12)]
+rownames(astro_data) <- data_shorten$Protein
+
+hist(as.matrix(astro_data), breaks = 100)
+
+library(pcaMethods)
+astro_data$na_count <- rowSums(is.na(astro_data))
+naid <- which(astro_data$na_count == ncol(astro_data)-1)
+astro_data <- astro_data[-naid,-7] 
+rownames(astro_data) <- rownames(data_shorten)[-naid]
+astro_data_bpca <- pca(astro_data, method = "bpca", center = TRUE, nPcs = 5, completeObs = TRUE, scale = "vector")
+
+astro_data_bpca <- as.data.frame(astro_data_bpca@completeObs)
+rownames(astro_data_bpca) <- rownames(astro_data)
+hist(as.matrix(astro_data_bpca), breaks = 100)
 
 # #4. remove lowly expressed proteins
 # #convert "-inf" to "NA"
@@ -142,8 +145,8 @@ data.filt.pca %>% head()
 p <- prcomp(data.filt.pca, scale = TRUE)
 
 data.filt.pca = rownames_to_column(data.filt.pca)
-data.filt.pca$condition = c("F1_33C", "F2_33C", "F3_33C", "F1_37C", "F2_37C", "F3_37C", "M1_33C", "M2_33C", "M3_33C", "M1_37C", "M2_37C", "M3_37C")
-#data.filt.pca$hpi = data.filt.pca$hpi %>%  as.character()   # this makes the colour scale not an idiot
+#data.filt.pca$condition = c("F1_33C", "F2_33C", "F3_33C", "F1_37C", "F2_37C", "F3_37C", "M1_33C", "M2_33C", "M3_33C", "M1_37C", "M2_37C", "M3_37C")
+data.filt.pca$condition = c("F", "F", "F", "F", "F", "F", "M", "M", "M", "M", "M", "M")
 
 autoplot(p, data=data.filt.pca, colour = "condition")
 
@@ -166,7 +169,7 @@ data.t.z <- standardize(data.t)
 rownames(data.t.z)==astro_meta_data$sample #check
 
 # The order is not the same. Order both objects and try again
-meta_data.order <- meta_data[order(meta_data$sample),]
+meta_data.order <- astro_meta_data[order(astro_meta_data$sample),]
 
 #I am sure you could order the rownames directly too, but here I move the sample names into a column, order it, and move it back to rownames
 data.t.z <- rownames_to_column(data.t.z) 
@@ -301,6 +304,7 @@ add_sig.prots <- topTable(int_tmp, coef = "sexM", n = Inf, p.value = 0.05)
 
 
 ## Split the Protein name by delimiter "|"
+T37_prots <- rownames_to_column(T37_prots, "Protein") 
 T37_prots <- separate_wider_delim(T37_prots, cols=Protein, delim = "|", names = c("first", "second", "third"))
 T37_prots <- separate_wider_delim(T37_prots, cols = third, delim = "_", names= c("name", "human"))
 T37_prots <- T37_prots %>% select(-c("first", "second", "human"))
@@ -319,10 +323,12 @@ T37_prots$delabel <- NA
 T37_prots$delabel[T37_prots$diffexpressed != "NO"] <- T37_prots$name[T37_prots$diffexpressed != "NO"]
 
 # Re-plot but this time color the points with "diffexpressed"
-ggplot(data=T37_prots, aes(x=logFC, y=-log10(adj.P.Val), col=diffexpressed, label=delabel)) + geom_point() + theme_minimal() + geom_text_repel(size = 3, colour = "black") +
+ggplot(data=T37_prots, aes(x=logFC, y=-log10(adj.P.Val), col=diffexpressed, label=delabel)) + geom_point() + theme_minimal() + geom_text_repel(size = 3, colour = "black",max.overlaps = 25) +
          scale_color_manual(values=c("pink", "gray", "plum3")) +
         geom_vline(xintercept=0, col="gray20") +
         geom_hline(yintercept=-log10(0.05), col="gray20")
+
+###GFAP PROTEIN IS DOWNREGULATED IN MALES
 
 
 ```

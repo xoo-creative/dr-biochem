@@ -23,17 +23,22 @@ library(ggfortify)
 
 ```{r}
 #protein data
-MDAMB_raw <- read_tsv(file = '../data/combined_protein_reMDAMB.tsv')
+MDAMB_raw_data <- read_tsv(file = '../data/combined_protein_reMDAMB.tsv')
 
 #meta data
 MDAMB_meta_data <- read_tsv(file = '../data/experiment_annotation_reMDAMB.tsv')
-#MDAMB_meta_data = drop_na(MDAMB_meta_data)
+
+c468_meta_data <- MDAMB_meta_data[c(1:8, 13:20, 25:32), ]
+
+c231_meta_data <- MDAMB_meta_data[c(9:12, 21:24), ]
+
 ```
+
 
 
 ```{r}
 #1. remove contamination
-MDAMB_remove_contam <- MDAMB_raw[- grep("contam_sp", MDAMB_raw$Protein),]
+MDAMB_remove_contam <- MDAMB_raw_data[- grep("contam_sp", MDAMB_raw_data$Protein),]
 
 #2. remove unnecessary columns
 MDAMB_shorten <- select(MDAMB_remove_contam, Protein, "Protein ID", "Entry Name", Description, contains("MaxLFQ Intensity"))
@@ -41,53 +46,43 @@ MDAMB_shorten[MDAMB_shorten == 0] <- NA
 
 #3. log transformation
 
-MADMB_numeric <- MDAMB_shorten %>% select(contains("MaxLFQ Intensity"))
-rownames(MADMB_numeric) <- MDAMB_shorten$Protein
-MADMB_logged <- log2(MADMB_numeric)
-rownames(MADMB_logged) <- MDAMB_shorten$Protein
+MDAMB_numeric <- MDAMB_shorten %>% select(contains("MaxLFQ Intensity"))
+rownames(MDAMB_numeric) <- MDAMB_shorten$Protein
+MDAMB_logged <- log2(MDAMB_numeric)
+rownames(MDAMB_logged) <- MDAMB_shorten$Protein
 
+MDAMB_logged$na_count <- rowSums(is.na(MDAMB_logged))
+naid <- which(MDAMB_logged$na_count == ncol(MDAMB_logged)-1)
+MDAMB_logged <- MDAMB_logged[-naid,-37] 
+rownames(MDAMB_logged) <- rownames(MDAMB_numeric)[-naid]
 
-# #4. remove lowly expressed proteins
+hist(as.matrix(MDAMB_logged), breaks = 100)
+
+# #4. data imputation
 # 
-# #make a new column counting the number of "NA" values
-# count <- rowSums(is.na(MADMB_logged))
-data.log.filt <- data.frame(cbind(MADMB_logged, "Count" = count))
+# MDAMB_bpca <- pca(MDAMB_logged, method = "bpca", center = TRUE, nPcs = 5, completeObs = TRUE, scale = "vector")
 # 
-# #Adjust the threshold at your discretion. 
-# #Here, I am allowing up to 75% of protein observations to be "NA"
-# data.log.filt <- subset(data.log.filt, Count < ncol(MADMB_logged)*0.75)
-# data.log.filt <- subset(data.log.filt, select = -c(Count)) #Remove count variable
+# MDAMB_bpca <- as.data.frame(MDAMB_bpca@completeObs)
+# rownames(MDAMB_bpca) <- rownames(MDAMB_logged)
+
+hist(as.matrix(MDAMB_bpca), breaks = 100)
 ```
 
-## Without Log transform (For PCA)
-```{r}
-count <- rowSums(is.na(MADMB_numeric))
-data.filt <- data.frame(cbind(MADMB_numeric, "Count" = count))
-
-data.filt <- subset(data.filt, Count < ncol(MADMB_numeric)*0.75)
-data.filt <- subset(data.filt, select = -c(Count))
-
-```
+## PCA (Without Log transform)
 
 ```{r}
 
-data.filt.pca <- t(data.filt) %>% as.data.frame()
+data.filt.pca <- t(MDAMB_logged) %>% as.data.frame()
 
 ## replace NA with 0 because that should mean 0 spectral count
 data.filt.pca[is.na(data.filt.pca)] <- 0
-
-## A way you can check which column has all the same values (if any)
-# which(apply(data.filt.pca, 2, var)==0)
-
-# data.filt.pca = data.filt.pca %>% select(-c(rowname))
-
-data.filt.pca %>% head()
+rownames(data.filt.pca) <- data.filt.pca[,1]
+data.filt.pca <- subset(data.filt.pca, select = -c(1))
 
 p <- prcomp(data.filt.pca, scale = TRUE)
 
 data.filt.pca = rownames_to_column(data.filt.pca)
-data.filt.pca$condition = c("control231", "control231", "control231", "control468", "control468", "control468", "control468_42hr", "control468_42hr", "control468_42hr", "drug231", "drug231", "drug231", "drug468", "drug468", "drug468", "drug468_42hr", "drug468_42hr", "drug468_42hr", "M3_33C", "M1_37C", "M2_37C", "M3_37C")
-#data.filt.pca$hpi = data.filt.pca$hpi %>%  as.character()   # this makes the colour scale not an idiot
+data.filt.pca$condition = c("control231", "control231", "control231", "control468", "control468", "control468", "control468_42hr", "control468_42hr", "control468_42hr", "drug231", "drug231", "drug231", "drug468", "drug468", "drug468", "drug468_42hr", "drug468_42hr", "drug468_42hr", "high231", "high231", "high_drug231", "high_drug231", "high231", "low468", "low468", "low468", "low468_42hr", "low468_42hr", "low468_42hr", "high_drug231", "low_drug468_42hr", "low_drug468", "low_drug468", "low_drug468", "low_drug468_42hr", "low_drug468_42hr")
 
 autoplot(p, data=data.filt.pca, colour = "condition")
 
@@ -101,8 +96,8 @@ autoplot(p, data=data.filt.pca, colour = "condition")
 # first, transpose data to standardize by protein
 # (by default, the standardize() function will calculate z scores by column,
 # so we want our proteins as columns now
-data.t <- data.frame(t(data.filt))
-data.t.z <- standardize(data.t)
+data.t <- data.frame(t(MDAMB_logged))
+data.t.z <- datawizard::standardize(data.t)
 
 # Now, we need the data in long-form (melted) for making the heatmap.
 # we want to bind the sample metadata to this matrix ahead of melting
@@ -148,57 +143,48 @@ ggplot(data.t.z.melt, aes(x = sample, y = Protein, fill = Z.score)) +
 
 ```
 
-
-
-
+## Data reorganization for limma
 ```{r}
-## Testing metadata
-test_meta <- read_tsv("../data/experiment_annotation.tsv")
-colnames(data.log.filt) == MDAMB_meta_data$sample_name #if false, order them
-
-desMat <- model.matrix(~ drug * cell_type, MDAMB_meta_data)
-
-solve(crossprod(desMat))
-
-y <- rnorm(36)
-summary(lm(y ~ 0 + desMat))
-fit <- lmFit(data.log.filt, desMat)
-
-data.log.filt["sp|O15498|YKT6_HUMAN",]
-
-test_data_log_filt <- data.log.filt
-
-
-test_data_log_filt[is.na(test_data_log_filt)] <- 1
+c468_data_logged <- MDAMB_logged[,c(4:9, 13:18, 24:29, 31:36)]
 ```
 
 
-##limma
+
+## Call for limma
 ```{r}
-# colnames(data.filt) == meta_data.order$sample #if false, order them
-colnames(data.log.filt) == MDAMB_meta_data$sample_name #if false, order them
-length(colnames(data.log.filt))
-length(MDAMB_meta_data$sample_name)
-
-## temporary solution for "Coefficients are not estimable"
-data.log.filt[is.na(data.log.filt)] <- 1
-
-desMat <- model.matrix(~ condition , MDAMB_meta_data)
-
-
-
-#Call limma
-fit <- lmFit(data.log.filt, desMat)
+design <- model.matrix(~ gene*drug, data = c468_meta_data)
+colnames(design) <- c("intercept", "genelow", "drugyes", "interaction")
+fit <- lmFit(c468_data_logged, design)
 colnames(fit)
+con <- makeContrasts(interaction - genelow, levels = design)
+fit.con <- contrasts.fit(fit, con)
+bayes <- eBayes(fit.con)
+results <- topTable(bayes, n =Inf, p.value = 0.05)
 
-tmp <- eBayes(fit)
-topTable(tmp, coef = "drugYES:cell_typeKO" )
+```
 
-limma.results <- topTable(tmp, n = Inf)
-sig.prots <- subset(limma.results, adj.P.Val < 0.05)
-head(sig.prots)
+## Volcano plots
+```{r}
+## Split the Protein name by delimiter "|"
+female_prots <- rownames_to_column(female_prots, "Protein") 
+female_prots <- separate_wider_delim(female_prots, cols=Protein, delim = "|", names = c("first", "second", "third"))
+female_prots <- separate_wider_delim(female_prots, cols = third, delim = "_", names= c("name", "human"))
+female_prots <- female_prots %>% select(-c("first", "second", "human"))
 
-head(coef(fit))
+# add a column of NAs
+female_prots$diffexpressed <- "NO"
+# if log2Foldchange > 0.6 and pvalue < 0.05, set as "UP" 
+female_prots$diffexpressed[female_prots$logFC > 0 & female_prots$adj.P.Val < 0.05] <- "UP"
+# if log2Foldchange < -0.6 and pvalue < 0.05, set as "DOWN"
+female_prots$diffexpressed[female_prots$logFC < 0 & female_prots$adj.P.Val < 0.05] <- "DOWN"
 
+female_prots$delabel <- NA
+female_prots$delabel[female_prots$diffexpressed != "NO"] <- female_prots$name[female_prots$diffexpressed != "NO"]
+
+# Re-plot but this time color the points with "diffexpressed"
+ggplot(data=female_prots, aes(x=logFC, y=-log10(adj.P.Val), col=diffexpressed, label=delabel)) + geom_point() + theme_minimal() + geom_text_repel(size = 3, colour = "black",max.overlaps = 30) +
+         scale_color_manual(values=c("pink", "gray", "plum3")) +
+        geom_vline(xintercept=0, col="gray20") +
+        geom_hline(yintercept=-log10(0.05), col="gray20")
 ```
 

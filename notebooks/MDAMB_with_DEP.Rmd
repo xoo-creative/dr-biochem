@@ -10,6 +10,7 @@ library("dplyr")
 library(readr)
 library(tidyverse)
 library(glue)
+library(pcaMethods)
 ```
 
 ## Your Files
@@ -147,6 +148,17 @@ data_contrasts <- test_diff(data_imputed, type = "manual",
                                        "low_drug468_vs_low468",
                                        "low_drug468_vs_drug468",
                                        "high_drug231_vs_drug231"))
+```
+
+
+```{r}
+design <- model.matrix(~ 0 + cell + gene + drug, data = metadata_raw)
+fit <- lmFit(data_imputed, design)
+con <- makeContrasts(drug_yes - drug_no, levels = design)
+fit.con <- contrasts.fit(fit, con)
+bayes <- eBayes(fit.con)
+results <- topTable(bayes, n =Inf, adjust = "fdr")
+
 ```
 
 ## Make DEP object
