@@ -6,6 +6,7 @@ output: html_document
 ---
 
 ### Load librarys
+
 ```{r}
 # install.packages("datawizard")
 
@@ -28,6 +29,7 @@ library(pheatmap)
 ```
 
 ###import data
+
 ```{r}
 #protein data
 raw_data <- read_tsv(file = '../data/combined_protein_polyIC_astrocytes.tsv')
@@ -43,11 +45,8 @@ male_meta_data <- meta_data[13:24, ]
 male_polyIC10ug_meta_data <- meta_data[c(13:15, 19:21),]
 ```
 
-###pre-process/cleaning data:
-####1. remove contamination
-####2. remove unnecessary columns
-####3. log transformation if required
-####4. remove lowly expressed proteins
+###pre-process/cleaning data: ####1. remove contamination ####2. remove unnecessary columns ####3. log transformation if required ####4. remove lowly expressed proteins
+
 ```{r}
 #1. remove contamination
 data_wo_contam <- raw_data[- grep("contam_sp", raw_data$Protein),]
@@ -139,13 +138,14 @@ hist(as.matrix(data_bpca_filter), breaks = 100)
 ```
 
 ## Without Log transform (For PCA)
+
 ```{r}
 data_pca <- t(data_logged) %>% as.data.frame()
 
 ## replace NA with 0 because that should mean 0 spectral count
 data_pca[is.na(data_pca)] <- 0
 
-p <- prcomp(data_pca, scale = TRUE)
+p <- prcomp(data_pca, scale = FALSE)
 data_pca = rownames_to_column(data_pca)
 data_pca$condition = c("female_10ug", "female_10ug", "female_10ug", "female_1ug", "female_1ug", "female_1ug", "female_control", "female_control", "female_control", "female_lipo", "female_lipo", "female_lipo", "male_10ug", "male_10ug", "male_10ug", "male_1ug", "male_1ug", "male_1ug", "male_control", "male_control", "male_control", "male_lipo", "male_lipo", "male_lipo")
 
@@ -153,8 +153,8 @@ autoplot(p, data=data_pca, colour = "condition")
 
 ```
 
-
 ###quality control
+
 ```{r}
 # first, transpose data to standardize by protein
 # (by default, the standardize() function will calculate z scores by column,
@@ -233,6 +233,7 @@ ggplot(data.t.z.melt, aes(x = sample, y = Protein, fill = Z.score)) +
 ###limma differential analysis
 
 ####Data reorganization for limma
+
 ```{r}
 female_logged_data <- data_logged[,1:12]
 rownames(female_logged_data) <- rownames(data_logged)
@@ -252,6 +253,7 @@ rownames(male_polyIC10ug_data) <- rownames(data_logged)
 ```
 
 ####Call for limma
+
 ```{r}
 
 #Call limma - female 10ugpolyIC vs control
@@ -284,16 +286,59 @@ male_sig.prots <- topTable(male_tmp, n = Inf, p.value = 0.05)
 male_prots <- topTable(male_tmp, n = Inf)
 head(male_sig.prots)
 
+
+
+
 ```
+
+```{r}
+#Call limma - female 10ugpolyIC vs control
+all_desMat <- model.matrix(~ 0 + condition, meta_data)
+
+all_fit <- lmFit(data_bpca, all_desMat)
+colnames(all_fit)
+
+all_con <- makeContrasts(conditionm_10ug - conditionm_control, levels = all_desMat)
+all_con <- contrasts.fit(all_fit, all_con)
+
+all_tmp <- eBayes(all_con)
+
+all_sig_prots <- topTable(all_tmp, sort.by = "t", coef = "conditionm_10ug - conditionm_control", n = Inf, p.value = 0.05)
+test <- rownames_to_column(all_sig_prots)
+
+female_prots <- topTable(female_tmp, n = Inf)
+head(female_sig.prots)
+
+data_bpca_test = rownames_to_column(data_bpca)
+
+data_logged_test = rownames_to_column(data_logged)
+
+#Call limma - male 10ugpolyIC vs control
+male_desMat <- model.matrix(~ 0 + treatment, male_polyIC10ug_meta_data)
+
+male_fit <- lmFit(male_polyIC10ug_data, male_desMat)
+colnames(male_fit)
+
+male_con <- makeContrasts(treatmentpolyIC_10ug - treatmentno_polyIC, levels = male_desMat)
+male_fit_con <- contrasts.fit(male_fit, male_con)
+
+male_tmp <- eBayes(male_fit_con)
+
+male_sig.prots <- topTable(male_tmp, n = Inf, p.value = 0.05)
+male_prots <- topTable(male_tmp, n = Inf)
+head(male_sig.prots)
+```
+
 ```{r}
 #Call for limma - female
-desMat <- model.matrix(~ polyIC10ug + polyIC1ug + lipo, female_meta_data)
-fit <- lmFit(female_logged_data, desMat)
+desMat <- model.matrix(~ polyIC10ug + polyIC1ug + lipo + sex, meta_data)
+fit <- lmFit(data_logged, desMat)
 colnames(fit)
 tmp <- eBayes(fit)
-res <- topTable(tmp, n = Inf, coef = "polyIC10ugYES") 
-female_all <- topTable(tmp, n = Inf, coef = c("polyIC10ugYES", "polyIC1ugYES", "lipoYES"))
-female_results <- subset(female_all, n = Inf, female_all$adj.P.Val < 0.05)
+#res <- topTable(tmp, n = Inf, coef = "polyIC10ugYES")
+
+all <- topTable(tmp, n = Inf, coef = c("polyIC10ugYES", "polyIC1ugYES", "lipoYES"))
+results <- subset(all, n = Inf, all$adj.P.Val < 0.05)
 
 write.table(female_all, file = "female_astrocyte_polyIC_limma.txt", sep = "\t")
 
@@ -353,6 +398,7 @@ ggplot(topTenPlots.long, aes(x = Group, y = value, fill = Group)) +
   theme(axis.text.x = element_text(angle = -50, hjust = 0))+
   facet_wrap(~variable)
 ```
+
 ```{r}
 #Call for limma - male
 male_desMat <- model.matrix(~ polyIC10ug + polyIC1ug + lipo, male_meta_data)
@@ -373,7 +419,6 @@ male_datMat <- male_datMat[,order(names(male_datMat))]
 
 # no significant proteins identified
 ```
-
 
 ```{r}
 # The significantly differentially expressed genes are the ones found in the upper-left and upper-right corners.
@@ -403,6 +448,7 @@ ggplot(data=female_prots, aes(x=logFC, y=-log10(adj.P.Val), col=diffexpressed, l
         geom_hline(yintercept=-log10(0.05), col="gray20")
 
 ```
+
 ### gene set enrichment analysis
 
 ```{r}
@@ -423,4 +469,3 @@ ggplot(data=female_prots, aes(x=logFC, y=-log10(adj.P.Val), col=diffexpressed, l
 #                            category = "C7", 
 #                            subcategory = "IMMUNESIGDB")
 ```
-

@@ -16,7 +16,6 @@ output: html_document
 ### Load librarys
 ```{r}
 # install.packages("datawizard")
-
 library(readr)
 library(knitr)
 library(tidyverse)
@@ -28,20 +27,7 @@ library(datawizard)
 library(reshape2)
 library(ggplot2)
 library(ggfortify)
-library(ggrepel)
-library(tidyverse)
-library(fgsea)
-library(ggfortify)
-library(msigdbr) 
-library(data.table)
-library(R.utils)
-library(enrichplot)
-library(DOSE)
-library(clusterProfiler)
-library(ggridges)
-library(ReactomePA)
-library(org.Hs.eg.db)
-library(biomaRt)
+library(pcaMethods)
 ```
 
 ###import data
@@ -57,7 +43,7 @@ astro_meta_data$sex <- c("F", "F", "F", "F", "F", "F", "M", "M", "M", "M", "M", 
 astro_meta_data$time <- c("T33", "T33", "T33", "T37", "T37", "T37", "T33", "T33", "T33", "T37", "T37", "T37")
 female_meta_data <- astro_meta_data[1:6, ]
 male_meta_data <- astro_meta_data[7:12, ]
-astro_meta_data <- astro_meta_data[c(4:6, 10:12), ]
+astro_meta <- astro_meta_data[c(4:6, 10:12), ]
 ```
 
 ###pre-process/cleaning data:
@@ -80,29 +66,31 @@ rownames(numeric_MaxLFQ_data) <- data_shorten$Protein
 logged_data <- log2(numeric_MaxLFQ_data)
 rownames(logged_data) <- data_shorten$Protein
 
-female_logged_data <- select(logged_data, contains("female"))
-female_logged_data$Description = data_shorten$Description
-#column_to_rownames(female_logged_data, "Description")
-rownames(female_logged_data) <- data_shorten$Protein
+#re-organiza data for future analysis
 
+#female only
+female_logged_data <- logged_data[ , 1:6]
+female_logged_data$Description = data_shorten$Description
+#male only
 male_logged_data <- logged_data[ , 7:12]
 rownames(male_logged_data) <- data_shorten$Protein
-
+#both sex incubated at 37C only
 astro_data <- logged_data[ , c(4:6, 10:12)]
 rownames(astro_data) <- data_shorten$Protein
-
+#pre-imputation data
 hist(as.matrix(astro_data), breaks = 100)
 
-library(pcaMethods)
+#4. imputation
 astro_data$na_count <- rowSums(is.na(astro_data))
 naid <- which(astro_data$na_count == ncol(astro_data)-1)
 astro_data <- astro_data[-naid,-7] 
 rownames(astro_data) <- rownames(data_shorten)[-naid]
 astro_data_bpca <- pca(astro_data, method = "bpca", center = TRUE, nPcs = 5, completeObs = TRUE, scale = "vector")
-
 astro_data_bpca <- as.data.frame(astro_data_bpca@completeObs)
 rownames(astro_data_bpca) <- rownames(astro_data)
 hist(as.matrix(astro_data_bpca), breaks = 100)
+
+#no data imputation
 
 # #4. remove lowly expressed proteins
 # #convert "-inf" to "NA"
@@ -118,17 +106,14 @@ hist(as.matrix(astro_data_bpca), breaks = 100)
 # data.log.filt <- subset(data.log.filt, select = -c(Count)) #Remove count variable
 ```
 
-## Without Log transform (For PCA)
+## PCA(Without Log transform))
+
 ```{r}
 count <- rowSums(is.na(numeric_MaxLFQ_data))
 data.filt <- data.frame(cbind(numeric_MaxLFQ_data, "Count" = count))
 
 data.filt <- subset(data.filt, Count < ncol(numeric_MaxLFQ_data)*0.75)
 data.filt <- subset(data.filt, select = -c(Count))
-
-```
-
-```{r}
 
 data.filt.pca <- t(data.filt) %>% as.data.frame()
 
@@ -186,7 +171,7 @@ vars <- colnames(astro_meta_data)
 data.t.z.melt <- melt(data.t.z, id.vars = vars, value.name = "Z.score", variable.name = "Protein")
 head(data.t.z.melt)
 
-ggplot(data.t.z.melt, aes(x = condition, y = Protein, fill = Z.score)) +
+ggplot(data.t.z.melt, aes(x = sample, y = Protein, fill = Z.score)) +
   geom_tile()+
   scale_fill_gradient2(low = "#0571b0", mid = "white", high = "#ca0020",
                        name = "Z score", limits = c(-4,4),na.value = "grey")+
@@ -203,7 +188,7 @@ ggplot(data.t.z.melt, aes(x = condition, y = Protein, fill = Z.score)) +
   scale_y_discrete(expand = c(0,0)) + 
   scale_x_discrete(expand = c(0,0))  
 
-#data look uniform without major outliers
+#male_37_1 looks like an outlier
 
 ```
 
@@ -262,39 +247,17 @@ female_sig.prots <- topTable(female_tmp, coef = "timeT37", n = Inf, p.value = 0.
 #female_sig.prots <- subset(limma.results, adj.P.Val < 0.05)
 head(female_sig.prots)
 
-#Call limma - T37 astrocytes for male and female
-T37_desMat <- model.matrix(~ sex, T37_meta_data)
+#Call limma - astrocytes for male and female
+astro_desMat <- model.matrix(~ sex, astro_meta)
 
-T37_fit <- lmFit(T37_logged_data, T37_desMat)
-colnames(T37_fit)
+astro_fit <- lmFit(astro_data, astro_desMat)
+colnames(astro_fit)
 
-T37_tmp <- eBayes(T37_fit)
+astro_tmp <- eBayes(astro_fit)
 
-T37_sig.prots <- topTable(T37_tmp, coef = "sexM", n = Inf, p.value = 0.05)
-T37_prots <- topTable(T37_tmp, coef = "sexM", n = Inf)
-head(T37_sig.prots)
+astro_sig.prots <- topTable(astro_tmp, coef = "sexM", n = Inf, p.value = 0.01)
+astro_prots <- topTable(astro_tmp, coef = "sexM", n = Inf)
 
-#interaction
-#Call limma - T37 astrocytes for male and female
-int_desMat <- model.matrix(~ sex*time, astro_meta_data)
-
-int_fit <- lmFit(logged_data, int_desMat)
-colnames(int_fit)
-
-int_tmp <- eBayes(int_fit)
-
-int_sig.prots <- topTable(int_tmp, coef = "sexM:timeT37", n = Inf)
-head(T37_sig.prots)
-
-#Call limma - T37 astrocytes for male and female
-add_desMat <- model.matrix(~ sex+time, astro_meta_data)
-
-add_fit <- lmFit(logged_data, add_desMat)
-colnames(add_fit)
-
-add_tmp <- eBayes(add_fit)
-
-add_sig.prots <- topTable(int_tmp, coef = "sexM", n = Inf, p.value = 0.05)
 ```
 
 
@@ -304,29 +267,27 @@ add_sig.prots <- topTable(int_tmp, coef = "sexM", n = Inf, p.value = 0.05)
 
 
 ## Split the Protein name by delimiter "|"
-T37_prots <- rownames_to_column(T37_prots, "Protein") 
-T37_prots <- separate_wider_delim(T37_prots, cols=Protein, delim = "|", names = c("first", "second", "third"))
-T37_prots <- separate_wider_delim(T37_prots, cols = third, delim = "_", names= c("name", "human"))
-T37_prots <- T37_prots %>% select(-c("first", "second", "human"))
+astro_prots <- rownames_to_column(astro_prots, "Protein") 
+astro_prots <- separate_wider_delim(astro_prots, cols=Protein, delim = "|", names = c("first", "second", "third"))
+astro_prots <- separate_wider_delim(astro_prots, cols = third, delim = "_", names= c("name", "human"))
+astro_prots <- astro_prots %>% select(-c("first", "second", "human"))
 
 # add a column of NAs
-T37_prots$diffexpressed <- "NO"
+astro_prots$diffexpressed <- "NO"
 # if log2Foldchange > 0.6 and pvalue < 0.05, set as "UP" 
-T37_prots$diffexpressed[T37_prots$logFC > 0 & T37_prots$adj.P.Val < 0.05] <- "UP"
+astro_prots$diffexpressed[astro_prots$logFC > 0 & astro_prots$adj.P.Val < 0.01] <- "UP"
 # if log2Foldchange < -0.6 and pvalue < 0.05, set as "DOWN"
-T37_prots$diffexpressed[T37_prots$logFC < 0 & T37_prots$adj.P.Val < 0.05] <- "DOWN"
+astro_prots$diffexpressed[astro_prots$logFC < 0 & astro_prots$adj.P.Val < 0.01] <- "DOWN"
 
-# protein labels
-# T37_prots <- rownames_to_column(T37_prots, "Protein")
-
-T37_prots$delabel <- NA
-T37_prots$delabel[T37_prots$diffexpressed != "NO"] <- T37_prots$name[T37_prots$diffexpressed != "NO"]
+astro_prots$delabel <- NA
+astro_prots$delabel[astro_prots$diffexpressed != "NO"] <- astro_prots$name[astro_prots$diffexpressed != "NO"]
 
 # Re-plot but this time color the points with "diffexpressed"
-ggplot(data=T37_prots, aes(x=logFC, y=-log10(adj.P.Val), col=diffexpressed, label=delabel)) + geom_point() + theme_minimal() + geom_text_repel(size = 3, colour = "black",max.overlaps = 25) +
+library(ggrepel)
+ggplot(data=astro_prots, aes(x=logFC, y=-log10(adj.P.Val), col=diffexpressed, label=delabel)) + geom_point() + theme_minimal() + geom_text_repel(size = 3, colour = "black",max.overlaps = 20) +
          scale_color_manual(values=c("pink", "gray", "plum3")) +
         geom_vline(xintercept=0, col="gray20") +
-        geom_hline(yintercept=-log10(0.05), col="gray20")
+        geom_hline(yintercept=-log10(0.01), col="gray20")
 
 ###GFAP PROTEIN IS DOWNREGULATED IN MALES
 
