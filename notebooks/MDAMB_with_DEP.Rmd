@@ -231,28 +231,156 @@ plot_volcano(dep, contrast = "high_drug231_vs_drug231", label_size = 2, add_name
 ```
 
 ```{r}
-test_gsea(dep, databases = c("KEGG_2019_Human"))
-```
-
-```{r}
-result = test_gsea(dep, databases = "KEGG_2021_Human")
-```
-
-```{r}
+{r}
 # NEED TO LOAD THIS LIBRARY FIRST
 library("enrichR")
 res <- listEnrichrDbs()
+
+GO_result = test_gsea(dep, databases = c("GO_Biological_Process_2023"))
+
+result = test_gsea(dep, databases = c("GO_Biological_Process_2023", "KEGG_2021_Human"))
 ```
+
+```{r}
+KEGG_result = test_gsea(dep, databases = "KEGG_2021_Human")
+```
+
+```{r}
+reactome_result = test_gsea(dep, databases = "Reactome_2022")
+```
+
+```{r}
+HDSigDB_result = test_gsea(dep, databases = "HDSigDB_Human_2021")
+```
+
+##low468_vs_control468
+
+```{r}
+low468_vs_control468_data = result |> filter(contrast == "low468_vs_control468")|> filter(P.value < 0.05)
+
+plotEnrich(low468_vs_control468_data, showTerms = 30, numChar = 60)
+
+```
+
+```{r}
+low468_vs_control468_data_kegg = KEGG_result |> filter(contrast == "low468_vs_control468")|> filter(P.value < 0.05)
+
+plotEnrich(low468_vs_control468_data_kegg, showTerms = 30, numChar = 60)
+```
+
+```{r}
+low468_vs_control468_data_HD = HDSigDB_result |> filter(contrast == "low468_vs_control468")
+
+plotEnrich(low468_vs_control468_data_HD, showTerms = 30, numChar = 100)
+```
+
+##drug468 vs control468
+
+```{r}
+drug468_vs_control468_data = result |> filter(contrast == "drug468_vs_control468")|> filter(P.value < 0.05)
+
+plotEnrich(drug468_vs_control468_data, showTerms = 30, numChar = 60)
+```
+
+```{r}
+drug468_vs_control468_data_reac = reactome_result |> filter(contrast == "drug468_vs_control468")|> filter(P.value < 0.05)
+
+plotEnrich(drug468_vs_control468_data_reac, showTerms = 30, numChar = 60)
+```
+
+```{r}
+drug468_vs_control468_data_go = GO_result |> filter(contrast == "drug468_vs_control468")|> filter(P.value < 0.05)
+
+plotEnrich(drug468_vs_control468_data_go, showTerms = 30, numChar = 60)
+
+```
+
+##drug231 vs control231
 
 ```{r}
 drug231_vs_control231_data = result |> filter(contrast == "drug231_vs_control231") |> filter(P.value < 0.05)
-```
 
-```{r}
-plotEnrich(drug231_vs_control231_data)
+plotEnrich(drug231_vs_control231_data, showTerms = 30, numChar = 60)
 ```
 
 ```{r}
 library(enrichplot)
 ridgeplot(drug231_vs_control231_data)
+```
+
+##high231 vs control231
+
+```{r}
+high231_vs_control231_data = result |> filter(contrast == "high231_vs_control231")|> filter(P.value < 0.05)
+
+plotEnrich(high231_vs_control231_data, showTerms = 30, numChar = 60)
+
+```
+
+```{r}
+high231_vs_control231_data_reac = reactome_result |> filter(contrast == "high231_vs_control231")|> filter(P.value < 0.05)
+
+plotEnrich(high231_vs_control231_data_reac, showTerms = 70, numChar = 60)
+```
+
+##high_drug231 vs drug231
+
+```{r}
+drug_high231_vs_high231_data = result |> filter(contrast == "high_drug231_vs_high231")|> filter(P.value < 0.05)
+
+plotEnrich(drug_high231_vs_high231_data, showTerms = 30, numChar = 60)
+```
+
+##drug_low468_vs_low468
+
+```{r}
+drug_low468_vs_low468_data = result |> filter(contrast == "low_drug468_vs_low468")|> filter(P.value < 0.05)
+
+plotEnrich(drug_low468_vs_low468_data, showTerms = 30, numChar = 60)
+
+```
+
+```{r}
+drug_low468_vs_drug468_data = result |> filter(contrast == "low_drug468_vs_drug468")|> filter(P.value < 0.05)
+
+plotEnrich(drug_low468_vs_drug468_data, showTerms = 30, numChar = 60)
+```
+
+```{r}
+drug_high231_vs_drug231_data = result |> filter(contrast == "high_drug231_vs_drug231")|> filter(P.value < 0.05)
+
+plotEnrich(drug_high231_vs_drug231_data, showTerms = 30, numChar = 60)
+```
+
+```{r}
+
+```
+
+## Testing enrichment
+
+```{r}
+row_data = SummarizedExperiment::rowData(dep, use.names = FALSE)
+```
+
+```{r}
+df <- row_data |> as.data.frame() |> select(name, ends_with("_significant")) |> mutate(name=gsub("[.].*", "", name))
+
+contrast = "low_drug468_vs_low468_significant"
+
+significant = df[df[[contrast]],]
+
+genes = significant$name
+
+enrich_result_test = enrichR::enrichr(genes, databases = "GO_Biological_Process_2023")
+```
+
+```{r}
+organism = "org.Hs.eg.db"
+
+```
+
+```{r}
+data(geneList, package="DOSE")
+de <- names(geneList)[abs(geneList) > 2]
+ego <- enrichGO(de, OrgDb = "org.Hs.eg.db", ont="BP", readable=TRUE)
 ```
