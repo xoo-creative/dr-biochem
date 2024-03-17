@@ -1,0 +1,470 @@
+---
+title: "Astrocyte with 229E infection (trial1 MOI_1 for 4_dpi)"
+output: html_document
+date: "2024-03-17"
+---
+
+### Load librarys
+
+```{r}
+# install.packages("datawizard")
+
+library(readr)
+library(knitr)
+library(tidyverse)
+library(GEOquery)
+library(limma)
+library(statmod)
+library(ggplot2)
+library(datawizard)
+library(reshape2)
+library(ggplot2)
+library(ggfortify)
+library(ggrepel)
+library(tidyverse)
+library(pcaMethods)
+library(RColorBrewer)
+library(pheatmap)
+```
+
+###import data
+
+```{r}
+#protein data
+raw_data <- read_tsv(file = '../data/combined_protein_polyIC_astrocytes.tsv')
+
+#meta data
+meta_data <- read_tsv(file = '../data/experiment_annotation_polyIC_astrocytes.tsv')
+
+meta_data$treatment <- c("polyIC_10ug", "polyIC_10ug", "polyIC_10ug", "polyIC_1ug", "polyIC_1ug", "polyIC_1ug", "no_polyIC", "no_polyIC", "no_polyIC", "lipo", "lipo", "lipo", "polyIC_10ug", "polyIC_10ug", "polyIC_10ug", "polyIC_1ug", "polyIC_1ug", "polyIC_1ug", "no_polyIC", "no_polyIC", "no_polyIC", "lipo", "lipo", "lipo")
+
+female_meta_data <- meta_data[1:12, ]
+female_polyIC10ug_meta_data <- meta_data[c(1:3, 7:9),]
+male_meta_data <- meta_data[13:24, ]
+male_polyIC10ug_meta_data <- meta_data[c(13:15, 19:21),]
+```
+
+###pre-process/cleaning data: ####1. remove contamination ####2. remove unnecessary columns ####3. log transformation if required ####4. remove lowly expressed proteins
+
+```{r}
+#1. remove contamination
+data_wo_contam <- raw_data[- grep("contam_sp", raw_data$Protein),]
+
+#2. remove unnecessary columns
+data_shorten <- select(data_wo_contam, Protein, "Protein ID", "Entry Name", Description, contains("MaxLFQ Intensity"))
+data_shorten[data_shorten == 0] <- NA
+
+#3. log transformation
+
+data_numeric <- data_shorten %>% select(contains("MaxLFQ Intensity"))
+rownames(data_numeric) <- data_shorten$Protein
+data_logged <- log2(data_numeric)
+rownames(data_logged) <- data_shorten$Protein
+
+data_logged$na_count <- rowSums(is.na(data_logged))
+naid <- which(data_logged$na_count == ncol(data_logged)-1)
+data_logged <- data_logged[-naid,-25] 
+rownames(data_logged) <- rownames(data_numeric)[-naid]
+
+## histogram before imputation
+hist(as.matrix(data_logged), breaks = 100)
+
+#4. remove lowly expressed proteins
+
+#convert "-inf" to "NA"
+data_logged[data_logged == "-Inf"] <- NA
+
+#make a new column counting the number of "NA" values
+count <- rowSums(is.na(data_logged))
+data_filt <- data.frame(cbind(data_logged, "Count" = count))
+
+#Adjust the threshold at your discretion.
+#Here, I am allowing up to 75% of protein observations to be "NA"
+data_filt <- subset(data_filt, Count < ncol(data_logged)*0.75)
+data_filt <- subset(data_filt, select = -c(Count)) #Remove count variable
+
+hist(as.matrix(data_filt), breaks = 100)
+
+#remotes::install_github("PNNL-Comp-Mass-Spec/MSnSet.utils")
+library(MSnSet.utils) # complex_heatmap
+library(circlize) # colorRamp2
+library(ComplexHeatmap) # additional modifications
+
+data_logged_heatmap <- replace(data_logged, is.na(data_logged), 0)
+heatmap(
+  as.matrix(data_logged_heatmap))
+#https://pnnl-comp-mass-spec.github.io/proteomics-data-analysis-tutorial/expression-heatmaps.html
+
+#4. data imputation
+
+#method number 1
+
+imput_data <- llsImpute(data_logged, k=10, center = TRUE, completeObs = TRUE)
+imput_dataframe <- as.data.frame(imput_data@completeObs)
+hist(as.matrix(imput_dataframe), breaks = 100)
+
+#method number 2
+library(imputeLCMD)
+
+svd <- as.data.frame(impute.wrapper.SVD(data_logged, K = 10))
+hist(as.matrix(svd), breaks = 100)
+
+#method number 3
+data_bpca <- pca(data_logged, method = "bpca", center = TRUE, nPcs = 5, completeObs = TRUE, scale = "vector")
+
+data_bpca <- as.data.frame(data_bpca@completeObs)
+rownames(data_bpca) <- rownames(data_logged)
+hist(as.matrix(data_bpca), breaks = 100)
+
+#with filted data:
+#method number 1
+imput_data_filter <- llsImpute(data_filt, k=10, center = TRUE, completeObs = TRUE)
+imput_dataframe_filter <- as.data.frame(imput_data_filter@completeObs)
+hist(as.matrix(imput_dataframe_filter), breaks = 100)
+
+#method number 2
+
+svd_filter <- as.data.frame(impute.wrapper.SVD(data_filt, K = 10))
+hist(as.matrix(svd_filter), breaks = 100)
+
+#method number 3
+data_bpca_filter <- pca(data_filt, method = "bpca", center = TRUE, nPcs = 5, completeObs = TRUE, scale = "vector")
+
+data_bpca_filter <- as.data.frame(data_bpca_filter@completeObs)
+rownames(data_bpca_filter) <- rownames(data_filt)
+hist(as.matrix(data_bpca_filter), breaks = 100)
+
+```
+
+## Without Log transform (For PCA)
+
+```{r}
+data_pca <- t(data_logged) %>% as.data.frame()
+
+## replace NA with 0 because that should mean 0 spectral count
+data_pca[is.na(data_pca)] <- 0
+
+p <- prcomp(data_pca, scale = FALSE)
+data_pca = rownames_to_column(data_pca)
+data_pca$condition = c("female_10ug", "female_10ug", "female_10ug", "female_1ug", "female_1ug", "female_1ug", "female_control", "female_control", "female_control", "female_lipo", "female_lipo", "female_lipo", "male_10ug", "male_10ug", "male_10ug", "male_1ug", "male_1ug", "male_1ug", "male_control", "male_control", "male_control", "male_lipo", "male_lipo", "male_lipo")
+
+autoplot(p, data=data_pca, colour = "condition")
+
+```
+
+###quality control
+
+```{r}
+# first, transpose data to standardize by protein
+# (by default, the standardize() function will calculate z scores by column,
+# so we want our proteins as columns now
+data.t <- data.frame(t(data_logged))
+data.t.z <- datawizard::standardize(data.t)
+
+# heat map map, we need the data in long-form (melted) for making the heatmap.
+# we want to bind the sample metadata to this matrix ahead of melting
+# First make sure the protein data and the metadata are ordered the same
+rownames(data.t.z)==meta_data$sample #check
+
+# The order is not the same. Order both objects and try again
+meta_data.order <- meta_data[order(meta_data$sample),]
+
+#I am sure you could order the rownames directly too, but here I move the sample names into a column, order it, and move it back to rownames
+data.t.z <- rownames_to_column(data.t.z) 
+data.t.z <- data.t.z[order(data.t.z$rowname),]
+rownames(data.t.z) <- NULL #uninitialize rownames to accept new names
+data.t.z <- column_to_rownames(data.t.z, var = "rowname")
+rownames(data.t.z) == meta_data$sample #Success!
+
+#now that it's ordered, bind metadata variables to protein data
+data.t.z <- data.frame(cbind(data.t.z, meta_data))
+
+#define vector for id.vars
+vars <- colnames(meta_data)
+data.t.z.melt <- melt(data.t.z, id.vars = vars, value.name = "Z.score", variable.name = "Protein")
+head(data.t.z.melt)
+
+ggplot(data.t.z.melt, aes(x = sample, y = Protein, fill = Z.score)) +
+  geom_tile()+
+  scale_fill_gradient2(low = "#0571b0", mid = "white", high = "#ca0020",
+                       name = "Z score", limits = c(-4,4),na.value = "grey")+
+  theme_bw()+
+  theme(axis.text.y = element_blank(),
+        axis.text.x = element_text(angle = -50, hjust = 0, size = 6, color = "black"),
+        plot.background = element_blank(),
+        axis.title.x = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.background = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "top")+
+  scale_y_discrete(expand = c(0,0)) + 
+  scale_x_discrete(expand = c(0,0))  
+
+#data look uniform without major outliers
+
+```
+
+```{r}
+# # check for data quality with scattered plots
+# 
+# histogram_log_data_sample <- data.log.filt %>%  select("X215_LucyC_6hpi1_100ng_1.Total.Intensity")
+# 
+# histogram_log_data_sample %>% head()
+# 
+# ggplot(histogram_log_data_sample, aes(x=X215_LucyC_6hpi1_100ng_1.Total.Intensity)) + geom_histogram()
+# 
+# histogram_log_data <- data.frame(t(data.log.filt)) %>%  select(0:1)
+# 
+# head(histogram_log_data)
+# 
+# ggplot(histogram_log_data, aes(x=sp.A0A0B4J2D5.GAL3B_HUMAN)) + geom_histogram()
+# 
+# library(GGally)
+# 
+# 
+# data.filt
+# ggpairs(data.log.filt, columns = c(1, 4, 6))
+# ggpairs(data.log.filt, columns = c(4, 5, 6))
+
+```
+
+###limma differential analysis
+
+####Data reorganization for limma
+
+```{r}
+female_logged_data <- data_logged[,1:12]
+rownames(female_logged_data) <- rownames(data_logged)
+# #column_to_rownames(female_logged_data, "Description")
+# rownames(female_logged_data) <- data_shorten$Protein
+
+male_logged_data <- data_logged[,13:24]
+rownames(male_logged_data) <- rownames(data_logged)
+
+female_polyIC10ug_data <- data_logged[,c(1:3, 7:9)]
+rownames(female_polyIC10ug_data) <- rownames(data_logged)
+
+male_polyIC10ug_data <- data_logged[,c(13:15, 19:21)]
+rownames(male_polyIC10ug_data) <- rownames(data_logged)
+
+
+```
+
+####Call for limma
+
+```{r}
+
+#Call limma - female 10ugpolyIC vs control
+female_desMat <- model.matrix(~ 0 + treatment, female_polyIC10ug_meta_data)
+
+female_fit <- lmFit(female_polyIC10ug_data, female_desMat)
+colnames(female_fit)
+
+female_con <- makeContrasts(treatmentpolyIC_10ug - treatmentno_polyIC, levels = female_desMat)
+fit_con <- contrasts.fit(female_fit, female_con)
+
+female_tmp <- eBayes(fit_con)
+
+female_sig.prots <- topTable(female_tmp, n = Inf, p.value = 0.05)
+female_prots <- topTable(female_tmp, n = Inf)
+head(female_sig.prots)
+
+#Call limma - male 10ugpolyIC vs control
+male_desMat <- model.matrix(~ 0 + treatment, male_polyIC10ug_meta_data)
+
+male_fit <- lmFit(male_polyIC10ug_data, male_desMat)
+colnames(male_fit)
+
+male_con <- makeContrasts(treatmentpolyIC_10ug - treatmentno_polyIC, levels = male_desMat)
+male_fit_con <- contrasts.fit(male_fit, male_con)
+
+male_tmp <- eBayes(male_fit_con)
+
+male_sig.prots <- topTable(male_tmp, n = Inf, p.value = 0.05)
+male_prots <- topTable(male_tmp, n = Inf)
+head(male_sig.prots)
+
+
+
+
+```
+
+```{r}
+#Call limma - female 10ugpolyIC vs control
+all_desMat <- model.matrix(~ 0 + condition, meta_data)
+
+all_fit <- lmFit(data_bpca, all_desMat)
+colnames(all_fit)
+
+all_con <- makeContrasts(conditionm_10ug - conditionm_control, levels = all_desMat)
+all_con <- contrasts.fit(all_fit, all_con)
+
+all_tmp <- eBayes(all_con)
+
+all_sig_prots <- topTable(all_tmp, sort.by = "t", coef = "conditionm_10ug - conditionm_control", n = Inf, p.value = 0.05)
+test <- rownames_to_column(all_sig_prots)
+
+female_prots <- topTable(female_tmp, n = Inf)
+head(female_sig.prots)
+
+data_bpca_test = rownames_to_column(data_bpca)
+
+data_logged_test = rownames_to_column(data_logged)
+
+#Call limma - male 10ugpolyIC vs control
+male_desMat <- model.matrix(~ 0 + treatment, male_polyIC10ug_meta_data)
+
+male_fit <- lmFit(male_polyIC10ug_data, male_desMat)
+colnames(male_fit)
+
+male_con <- makeContrasts(treatmentpolyIC_10ug - treatmentno_polyIC, levels = male_desMat)
+male_fit_con <- contrasts.fit(male_fit, male_con)
+
+male_tmp <- eBayes(male_fit_con)
+
+male_sig.prots <- topTable(male_tmp, n = Inf, p.value = 0.05)
+male_prots <- topTable(male_tmp, n = Inf)
+head(male_sig.prots)
+```
+
+```{r}
+#Call for limma - female
+desMat <- model.matrix(~ polyIC10ug + polyIC1ug + lipo + sex, meta_data)
+fit <- lmFit(data_logged, desMat)
+colnames(fit)
+tmp <- eBayes(fit)
+#res <- topTable(tmp, n = Inf, coef = "polyIC10ugYES")
+
+all <- topTable(tmp, n = Inf, coef = c("polyIC10ugYES", "polyIC1ugYES", "lipoYES"))
+results <- subset(all, n = Inf, all$adj.P.Val < 0.05)
+
+write.table(female_all, file = "female_astrocyte_polyIC_limma.txt", sep = "\t")
+
+result_list <- rownames(female_results)
+datMat <- data_logged[rownames(data_logged) %in% result_list, ] 
+
+#Create a color bar to distinguish sample groups
+datMat <- datMat[,order(names(datMat))]
+
+
+
+group <- data.frame(cbind("Group" = meta_data$treatment, "File" = meta_data$treatment))
+group <- column_to_rownames(group, var = "File")
+
+
+#https://davetang.org/muse/2018/05/15/making-a-heatmap-in-r-with-the-pheatmap-package/
+
+pheatmap(
+  as.matrix(datMat), scale="row", annotation_col = group,
+  width = 5, height = 8,
+   color=colorRampPalette(c("navy", "white", "red"))(50),
+  show_rownames = FALSE, show_colnames = FALSE,
+  Rowv=as.dendrogram(hclust(dist(as.matrix(datMat)))),
+  Colv=as.dendrogram(hclust(dist(t(as.matrix(datMat))))))
+
+
+topTen <- result_list[1:20]
+#data_logged$protein <- row.names(data_logged) 
+topTenPlots <- subset(data_logged, rownames(data_logged) %in% topTen)
+topTenPlots.t <- data.frame(t(topTenPlots))
+topTenPlots.t <- topTenPlots.t[order(row.names(topTenPlots.t)), ]
+topTenPlots.t <- cbind(topTenPlots.t, "Group" = meta_data$treatment, "File" = meta_data$sample)
+rownames(topTenPlots.t) <- NULL 
+topTenPlots.t <- column_to_rownames(topTenPlots.t, var = "File")
+library(reshape2)
+topTenPlots.long <- melt(topTenPlots.t, id.vars = "Group")
+
+ggplot(topTenPlots.long, aes(x = Group, y = value, fill = Group)) +
+  geom_boxplot(outlier.shape = NA, lwd = .5, show.legend = TRUE)+
+  geom_point(position = position_jitterdodge(jitter.width = .3,
+                                             dodge.width = .75), 
+             size = .5, alpha = 0.5, 
+             show.legend = FALSE) +
+  scale_y_continuous(name = "Protein abundance\n(log2(LFQ intensity))") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        axis.title.y = element_text(size = 10),
+        axis.title.x = element_text(size = 10),
+        axis.text.y = element_text(colour="black", size = 10),
+        axis.text.x = element_text(colour="black", size = 10),
+        axis.line = element_line(size=0.5, colour = "black")) +
+  scale_fill_brewer(palette = "Paired")+
+  theme(plot.margin = margin(0,1,0,0, "cm"))+
+  theme(axis.text.x = element_text(angle = -50, hjust = 0))+
+  facet_wrap(~variable)
+```
+
+```{r}
+#Call for limma - male
+male_desMat <- model.matrix(~ polyIC10ug + polyIC1ug + lipo, male_meta_data)
+male_fit <- lmFit(male_logged_data, male_desMat)
+colnames(male_fit)
+male_tmp <- eBayes(male_fit)
+male_res <- topTable(male_tmp, n = Inf, coef = "polyIC10ugYES") 
+male_all <- topTable(male_tmp, n = Inf, coef = c("polyIC10ugYES", "polyIC1ugYES", "lipoYES"))
+male_results <- subset(male_all, n = Inf, male_all$adj.P.Val < 0.05)
+
+write.table(male_all, file = "male_astrocyte_polyIC_limma.txt", sep = "\t")
+
+male_result_list <- rownames(male_results)
+male_datMat <- data_logged[rownames(data_logged) %in% result_list, ] 
+
+#Create a color bar to distinguish sample groups
+male_datMat <- male_datMat[,order(names(male_datMat))]
+
+# no significant proteins identified
+```
+
+```{r}
+# The significantly differentially expressed genes are the ones found in the upper-left and upper-right corners.
+# Add a column to the data frame to specify if they are UP- or DOWN- regulated (log2FoldChange respectively positive or negative)
+
+
+## Split the Protein name by delimiter "|"
+female_prots <- rownames_to_column(female_prots, "Protein") 
+female_prots <- separate_wider_delim(female_prots, cols=Protein, delim = "|", names = c("first", "second", "third"))
+female_prots <- separate_wider_delim(female_prots, cols = third, delim = "_", names= c("name", "human"))
+female_prots <- female_prots %>% select(-c("first", "second", "human"))
+
+# add a column of NAs
+female_prots$diffexpressed <- "NO"
+# if log2Foldchange > 0.6 and pvalue < 0.05, set as "UP" 
+female_prots$diffexpressed[female_prots$logFC > 0 & female_prots$adj.P.Val < 0.05] <- "UP"
+# if log2Foldchange < -0.6 and pvalue < 0.05, set as "DOWN"
+female_prots$diffexpressed[female_prots$logFC < 0 & female_prots$adj.P.Val < 0.05] <- "DOWN"
+
+female_prots$delabel <- NA
+female_prots$delabel[female_prots$diffexpressed != "NO"] <- female_prots$name[female_prots$diffexpressed != "NO"]
+
+# Re-plot but this time color the points with "diffexpressed"
+ggplot(data=female_prots, aes(x=logFC, y=-log10(adj.P.Val), col=diffexpressed, label=delabel)) + geom_point() + theme_minimal() + geom_text_repel(size = 3, colour = "black",max.overlaps = 30) +
+         scale_color_manual(values=c("pink", "gray", "plum3")) +
+        geom_vline(xintercept=0, col="gray20") +
+        geom_hline(yintercept=-log10(0.05), col="gray20")
+
+```
+
+### gene set enrichment analysis
+
+```{r}
+# knitr::kable(msigdbr::msigdbr_species())
+```
+
+#### KEGG database
+
+```{r}
+#Access the KEGG gene sets. 
+# kegg.human.db <- msigdbr::msigdbr(species = "human",
+#                                   category = "C2",
+#                                   subcategory = "CP:KEGG")
+```
+
+```{r}
+# IMMUNE.human.db <- msigdbr(species = "human", 
+#                            category = "C7", 
+#                            subcategory = "IMMUNESIGDB")
+```
