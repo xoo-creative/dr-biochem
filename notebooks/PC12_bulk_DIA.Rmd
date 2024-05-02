@@ -1,0 +1,262 @@
+---
+title: "PC12_bulk"
+author: "Lucy"
+date: "2024-02-02"
+output: html_document
+---
+---
+
+# Using DEP for Volcano Plots
+
+```{r}
+library("DEP")
+library("dplyr")
+library(readr)
+library(tidyverse)
+library(glue)
+library(pcaMethods)
+```
+
+## Your Files
+
+Make sure both your `combined_proteins` and `experiment_annotations` files are placed in the `data` folder. Once that's done, you can just paste in the **file names** into the two variables below:
+
+```{r}
+combined_proteins_file="INSERT_YOUR_FILE_PATH_HERE"
+experiment_annotation_file="INSERT_YOUR_FILE_PATH_HERE"
+
+
+## Example used for this notebook:
+combined_proteins_file="report.pg_matrix_Arpa_PC12.tsv"
+experiment_annotation_file="experiment_annotation_Arpa_PC12.tsv"
+
+```
+
+## Reading data in
+
+```{r}
+proteins_raw <- read_tsv(file = paste0("../data/", combined_proteins_file)) |> as.data.frame()
+
+metadata_raw <- read_tsv(file = paste0("../data/", experiment_annotation_file)) |> as.data.frame()
+
+```
+
+## Data Formatting
+
+```{r}
+# Remove Contamination
+proteins_raw_remove_contam <- proteins_raw |> filter(!grepl("contam", Protein))
+
+# Select the important columns
+proteins_shorten_raw <- select(proteins_raw_remove_contam, Protein, "Protein ID", "Entry Name", Description, contains("LFQ"))
+
+# Remove spaces from column names
+# "make.names" is a special function that formats all column names
+proteins <- proteins_shorten_raw |> rename_with(make.names)
+```
+
+## Extract protein name from `Entry.Name`
+
+```{r}
+## Split the Protein name by delimiter "|"
+proteins <- separate_wider_delim(proteins, cols=Protein, delim = "|", names = c("first", "second", "third"))
+
+# Split again to remove the "HUMAN" part of "XXX_HUMAN"
+proteins <- separate_wider_delim(proteins, cols = third, delim = "_", names= c("name", "human"))
+
+# Remove other columns that we made during the process
+proteins <- proteins %>% select(-c("first", "second", "human"))
+```
+
+```{r}
+# Use DEP's function to prepare final version
+proteins_for_dep <- make_unique(proteins, 
+                                  names="name", 
+                                  ids="Protein.ID")
+```
+
+## Make SummarizedExperiment Object
+
+### Prepare LFQ Column Numbers for DEP
+
+```{r}
+# DEP needs the column numbers that actually have the LFQ intensities
+LFQ_columns <- grep("LFQ", colnames(proteins_for_dep))
+```
+
+### Prepare Metadata for DEP
+
+```{r}
+# Remove columns we don't need 
+metadata_for_dep = metadata_raw |> select(-c(file, sample))
+
+# Rename columns, since DEP is expecting only three columns:
+#  "label", "condition", "replicate"
+metadata_for_dep = metadata_for_dep |> rename("label" = "sample_name")
+```
+
+### Make the SummarizedExperiment Object
+
+```{r}
+# Use DEP to make a SummarizedExperiment (se) object
+data <- make_se(proteins_for_dep, LFQ_columns, metadata_for_dep)
+```
+
+## Visualizations of Data
+
+```{r}
+plot_frequency(data)
+```
+
+```{r}
+plot_numbers(data)
+```
+
+```{r}
+plot_coverage(data)
+```
+
+```{r}
+data_normalized <- normalize_vsn(data)
+```
+
+```{r}
+plot_normalization(data, data_normalized)
+```
+
+```{r}
+plot_missval(data)
+```
+
+```{r}
+data_imputed <- impute(data_normalized, fun = "MinProb", q = 0.01)
+plot_imputation(data_normalized, data_imputed)
+```
+
+```{r}
+
+```
+
+## Differential Enrichment Analysis
+
+Contrasts need to be defined in the format of `CONDITION1_vs_CONDITION2` , and they need to match the name in the `condition` column in `metadata_for_dep`. For example, if you want to compare the condition `"control123"` with `"wildtype456"`, then the manual contrast will be `"control123_vs_wildtype456"`.
+
+```{r}
+# Manually define contrasts for the volcano plot
+data_contrasts <- test_diff(data_imputed, type = "manual", 
+                              test = c("low468_vs_control468",
+                                       "high231_vs_control231",
+                                       "drug231_vs_control231",
+                                       "drug468_vs_control468",
+                                       "high_drug231_vs_high231",
+                                       "low_drug468_vs_low468",
+                                       "low_drug468_vs_drug468",
+                                       "high_drug231_vs_drug231"))
+```
+
+
+```{r}
+design <- model.matrix(~ 0 + cell + gene + drug, data = metadata_raw)
+fit <- lmFit(data_imputed, design)
+con <- makeContrasts(drug_yes - drug_no, levels = design)
+fit.con <- contrasts.fit(fit, con)
+bayes <- eBayes(fit.con)
+results <- topTable(bayes, n =Inf, adjust = "fdr")
+
+```
+
+## Make DEP object
+
+`alpha`: The threshold for the adjusted p-value. Here, a sample value of `0.05` is used.
+
+`lfc`: the threshold for the log2 fold change. Here, a sample value of `1.5` fold change (then logged)
+
+```{r}
+dep <- add_rejections(data_contrasts, alpha = 0.05, lfc = log2(1.5))
+```
+
+## Visualizations for DEP objects
+
+```{r}
+plot_pca(dep, x = 1, y = 2, n = 500, point_size = 4)
+```
+
+```{r}
+plot_cor(dep, significant = TRUE, lower = 0, upper = 1, pal = "Spectral", font_size = 4)
+```
+
+```{r}
+plot_heatmap(dep, type = "centered", kmeans = TRUE,  col_limit = 4,
+             show_row_names = FALSE, indicate = c("condition", "replicate"),
+             col_font_size = 6)
+```
+
+```{r}
+plot_heatmap(dep, type = "contrast", kmeans = TRUE, col_font_size = 5,
+             k = 6, col_limit = 10, show_row_names = FALSE)
+```
+
+### Volcano Plots for Contrasts
+
+#### Does genetic engineer affect the overall proteome changes in 468 and 231?
+
+```{r}
+plot_volcano(dep, contrast = "low468_vs_control468", label_size = 2, add_names = TRUE)
+```
+
+```{r}
+plot_volcano(dep, contrast = "high231_vs_control231", label_size = 2, add_names = TRUE)
+```
+
+```{r}
+plot_volcano(dep, contrast = "drug231_vs_control231", label_size = 2, add_names = TRUE)
+```
+
+```{r}
+plot_volcano(dep, contrast = "drug468_vs_control468", label_size = 2, add_names = TRUE)
+```
+
+```{r}
+plot_volcano(dep, contrast = "high_drug231_vs_high231", label_size = 2, add_names = TRUE)
+```
+
+```{r}
+plot_volcano(dep, contrast = "low_drug468_vs_low468", label_size = 2, add_names = TRUE)
+```
+
+#### Does the drug have a diffferent effect on control cell lines vs engineered cell lines?
+
+```{r}
+plot_volcano(dep, contrast = "low_drug468_vs_drug468", label_size = 2, add_names = TRUE)
+```
+
+```{r}
+plot_volcano(dep, contrast = "high_drug231_vs_drug231", label_size = 2, add_names = TRUE)
+```
+
+```{r}
+test_gsea(dep, databases = c("KEGG_2019_Human"))
+```
+
+```{r}
+result = test_gsea(dep, databases = "KEGG_2021_Human")
+```
+
+```{r}
+# NEED TO LOAD THIS LIBRARY FIRST
+library("enrichR")
+res <- listEnrichrDbs()
+```
+
+```{r}
+drug231_vs_control231_data = result |> filter(contrast == "drug231_vs_control231") |> filter(P.value < 0.05)
+```
+
+```{r}
+plotEnrich(drug231_vs_control231_data)
+```
+
+```{r}
+library(enrichplot)
+ridgeplot(drug231_vs_control231_data)
+```
