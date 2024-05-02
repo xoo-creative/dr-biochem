@@ -1,0 +1,156 @@
+# Code Walkthrough of Fragpipe Analyst
+
+This notebook will walk through all code that is run step by step when you click the "analyze" button. Aimed to help with debugging fragpipe analyst when the errors are more confusing.
+
+### Read in protein files
+
+```{r}
+temp_data <- read.table("../data/osei_report_matrix.tsv",
+                 header = TRUE,
+                 fill= TRUE, # to fill any missing data
+                 sep = "\t",
+                 quote = "",
+                 comment.char = "",
+                 blank.lines.skip = F,
+                 check.names = F)
+```
+
+```{r}
+# Copied from https://github.com/MonashProteomics/FragPipe-Analyst/blob/main/R/functions.R
+make.unique.2 = function(x, sep='.'){
+  ave(x, x, FUN=function(a){if(length(a) > 1){paste(a, 1:length(a), sep=sep)} else {a}})
+}
+
+
+
+colnames(temp_data) <- make.unique.2(colnames(temp_data), "_")
+
+temp_data <- temp_data %>% select(.,-c("Proteotypic", "Precursor.Charge")) %>%
+          group_by(Protein.Group, Protein.Names, Protein.Ids, Genes, Stripped.Sequence) %>%
+          summarise_if(is.numeric, max, na.rm=T)
+temp_data[sapply(temp_data, is.infinite)] <- NA
+temp_data$Index <- paste0(temp_data$Protein.Ids, "_", temp_data$Stripped.Sequence)
+temp_data <- temp_data %>% select(Index, everything())
+```
+
+```{r}
+temp_df <- read.table("../data/osei_experiment_annotation.tsv",
+                              header = T,
+                              sep="\t",
+                              stringsAsFactors = FALSE)
+# change it to lower case
+colnames(temp_df) <- tolower(colnames(temp_df))
+# to support - (dash) or name starts with number in condition column
+temp_df$condition <- make.names(temp_df$condition)
+# make sure replicate column is not empty
+if (!all(is.na(temp_df$replicate))) {
+  temp_df$label <- temp_df$file
+}
+```
+
+```{r}
+filtered_data = temp_data
+exp_design = temp_df
+```
+
+### Process the data
+
+```{r}
+ data_unique <- DEP::make_unique(filtered_data, "Index", "Protein.Group")
+ cols <- colnames(data_unique)
+ selected_cols <- which(!(cols %in% c("Index", "Protein.Group", "Protein.Ids", "Stripped.Sequence", "Protein.Names", "Genes", "First.Protein.Description", "ID", "name")))
+ # test_match_DIA_column_design(data_unique, selected_cols, exp_design())
+```
+
+### Run the function you're curious about:
+
+```{r}
+
+# https://github.com/MonashProteomics/FragPipe-Analyst/blob/main/R/customized.R
+make_se_customized <- function(proteins_unique, columns, expdesign, log2transform=F, exp="LFQ", lfq_type=NULL, level=NULL) {
+  # Show error if inputs are not the required classes
+  assertthat::assert_that(is.data.frame(proteins_unique),
+                          is.integer(columns),
+                          is.data.frame(expdesign))
+  
+  # Show error if inputs do not contain required columns
+  if(any(!c("name", "ID") %in% colnames(proteins_unique))) {
+    stop("'name' and/or 'ID' columns are not present in '",
+         deparse(substitute(proteins_unique)),
+         "'.\nRun make_unique() to obtain the required columns",
+         call. = FALSE)
+  }
+  if(any(!c("label", "condition", "replicate") %in% colnames(expdesign))) {
+    stop("'label', 'condition' and/or 'replicate' columns",
+         "are not present in the experimental design",
+         call. = FALSE)
+  }
+  if(any(!apply(proteins_unique[, columns], 2, is.numeric))) {
+    stop("specified 'columns' should be numeric",
+         "\nRun make_se_parse() with the appropriate columns as argument",
+         call. = FALSE)
+  }
+  
+  # If input is a tibble, convert to data.frame
+  if(tibble::is_tibble(proteins_unique))
+    proteins_unique <- as.data.frame(proteins_unique)
+  if(tibble::is_tibble(expdesign))
+    expdesign <- as.data.frame(expdesign)
+  
+  # Select the assay data
+  rownames(proteins_unique) <- proteins_unique$name
+  raw <- proteins_unique[, columns]
+  raw[raw == 0] <- NA
+  if (log2transform) {
+    raw <- log2(raw)
+  }
+  # Generate the colData from the experimental design
+  # and match these with the assay data
+  # expdesign <- mutate(expdesign, condition = make.names(condition)) %>%
+  #   unite(ID, condition, replicate, remove = FALSE)
+  # rownames(expdesign) <- expdesign$ID
+  rownames(expdesign) <- expdesign$label
+  # print(expdesign)
+  # print(colnames(raw))
+  matched <- match(make.names(expdesign$label),
+                   make.names(colnames(raw)))
+
+  if(any(is.na(matched))) {
+    stop("None of the labels in the experimental design match ",
+         "with column names in 'proteins_unique'",
+         "\nRun make_se() with the correct labels in the experimental design",
+         "and/or correct columns specification")
+  }
+  
+  colnames(raw)[matched] <- expdesign$label
+  raw <- raw[, !is.na(colnames(raw))][rownames(expdesign)]
+
+  # Select the rowData
+  row_data <- proteins_unique[, -columns]
+  rownames(row_data) <- row_data$name
+
+  # Generate the SummarizedExperiment object
+  se <- SummarizedExperiment(assays = as.matrix(raw),
+                             colData = expdesign,
+                             rowData = row_data,
+                             metadata = list("exp"=exp,
+                                             "lfq_type"=lfq_type,
+                                             "level"=level,
+                                             "log2transform"=log2transform))
+  
+  return(se)
+}
+
+```
+
+```{r}
+data_se <- make_se_customized(data_unique, selected_cols, temp_df, log2transform=T, exp="DIA", level="peptide") 
+
+dimnames(data_se) <- list(dimnames(data_se)[[1]], colData(data_se)$sample_name) 
+
+colData(data_se)$label <- colData(data_se)$sample_name
+```
+
+```{r}
+exp_design = temp_df
+```
