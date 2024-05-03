@@ -1,0 +1,235 @@
+---
+title: "astrocytes_malevsfemale_DIA"
+author: "Lucy"
+date: "2024-05-02"
+output: html_document
+---
+
+```{r}
+library(readr)
+library(knitr)
+library(tidyverse)
+```
+
+### import data
+
+```{r}
+#protein data
+astro_rawdata <- read_tsv(file = '../data/20240226_primary_astrocytes_malevsfemale_bulk_original_TT.tsv')
+
+nrow(astro_rawdata)
+#meta data
+astro_metadata <- read_tsv(file = '../data/20240226_primary_astrocytes_malevsfemale_bulk_TT_metadata.tsv')
+```
+
+### pre-process/cleaning data:
+
+#### 1. remove contamination
+
+#### 2. log transformation if required
+
+#### 3. data imputation
+
+```{r}
+#1. remove contamination
+rawdata_wo_contam <- astro_rawdata[- grep("CONT", astro_rawdata$Protein.Group),]
+
+#2. Remove the "_HUMAN" off the Protein Names
+rawdata_wo_contam$Protein.Names <- gsub("_HUMAN", "", rawdata_wo_contam$Protein.Names)
+
+#3. log transformation
+
+astro_dat <- column_to_rownames(rawdata_wo_contam, var = "Protein.Names")
+proteins <- rownames(astro_dat)
+astro_protein_descriptions <- data.frame(cbind("Description" = astro_dat$First.Protein.Description, proteins))
+astro_dat_numeric <- select(astro_dat, -c(First.Protein.Description, Protein.Ids, Protein.Group, Genes))
+astro_dat <- log2(astro_dat_numeric)
+
+#4. imputation
+# astro_data$na_count <- rowSums(is.na(astro_data))
+# naid <- which(astro_data$na_count == ncol(astro_data)-1)
+# astro_data <- astro_data[-naid,-7] 
+# rownames(astro_data) <- rownames(data_shorten)[-naid]
+# astro_data_bpca <- pca(astro_data, method = "bpca", center = TRUE, nPcs = 5, completeObs = TRUE, scale = "vector")
+# astro_data_bpca <- as.data.frame(astro_data_bpca@completeObs)
+# rownames(astro_data_bpca) <- rownames(astro_data)
+# hist(as.matrix(astro_data_bpca), breaks = 100)
+
+```
+
+### quality control
+
+```{r}
+#make a new column counting the number of "NA" values
+count <- rowSums(is.na(astro_dat))
+datafilt <- data.frame(cbind(astro_dat, "Count" = count))
+
+#Adjust the threshold at your discretion. 
+#Here, I am allowing up to 2 protein observations to be "NA"
+datafilt <- subset(datafilt, Count < 2)
+datafilt <- subset(datafilt, select = -c(Count)) #Remove count variable
+
+#histogram
+ heatmap(
+   as.matrix(datafilt), 
+   Rowv=as.dendrogram(hclust(dist(as.matrix(datafilt)))),
+   Colv=as.dendrogram(hclust(dist(t(as.matrix(datafilt))))))
+ 
+```
+
+### PCA
+
+```{r}
+
+data_filt_pca <- t(datafilt) %>% as.data.frame()
+
+## replace NA with 0
+data_filt_pca[is.na(data_filt_pca)] <- 0
+
+## A way you can check which column has all the same values (if any)
+# which(apply(data.filt.pca, 2, var)==0)
+
+# data.filt.pca = data.filt.pca %>% select(-c(rowname))
+
+# data_filt_pca %>% head()
+
+p <- prcomp(data_filt_pca, scale = TRUE)
+
+data_filt_pca = rownames_to_column(data_filt_pca)
+data_filt_pca$condition = c("F", "F", "F", "F", "F", "F", "M", "M", "M", "M", "M", "M")
+
+autoplot(p, data=data_filt_pca, colour = "condition", fill_color = c(
+  'green', 'black'
+))
+```
+
+```{r}
+#check for metadata order
+astro_names <- colnames(astro_dat)
+colnames(datafilt) <- astro_names
+colnames(datafilt) == astro_metadata$file #if false - order them
+
+#if the order is incorrect
+# datafilt <- datafilt[,order(names(datafilt))]
+# astro_metadata <- astro_metadata[order(astro_metadata$file),]
+# #Check again
+# colnames(datafilt) == astro_metadata$file #TRUE!
+
+```
+
+### limma
+
+```{r}
+#library(limma)
+desMat <- model.matrix(~condition, astro_metadata)
+
+#Call limma
+fit <- lmFit(datafilt, desMat)
+colnames(fit)
+tmp <- eBayes(fit)
+astro_prots <- topTable(tmp, coef = "conditionmale", n = Inf)
+astro_sigprots <- topTable(tmp, coef = "conditionmale", n = Inf, p.value = 0.01)
+
+```
+
+```{r}
+#library(ggrepel)
+
+# add a column of NAs
+astro_prots$diffexpressed <- "NO"
+# if log2Foldchange > 0.6 and pvalue < 0.05, set as "UP" 
+astro_prots$diffexpressed[astro_prots$logFC > 0 & astro_prots$adj.P.Val < 0.01] <- "UP"
+# if log2Foldchange < -0.6 and pvalue < 0.05, set as "DOWN"
+astro_prots$diffexpressed[astro_prots$logFC < 0 & astro_prots$adj.P.Val < 0.01] <- "DOWN"
+
+astro_prots$delabel <- NA
+astro_prots$name <- row.names(astro_prots)
+astro_prots$delabel[astro_prots$diffexpressed != "NO"] <- astro_prots$name[astro_prots$diffexpressed != "NO"]
+
+ggplot(data=astro_prots, aes(x=logFC, y=-log10(adj.P.Val), col=diffexpressed, label=delabel)) + geom_point() + theme_minimal() + geom_text_repel(size = 3, colour = "darkgrey", max.overlaps = 40) +
+         scale_color_manual(values=c("#ff595e", "gray", "#1982c4")) +
+        geom_vline(xintercept=0, col="gray20") +
+        geom_hline(yintercept=-log10(0.01), col="gray20")
+```
+
+```{r}
+
+hitList <- rownames(astro_sigprots)
+datMat <- astro_dat[rownames(astro_dat) %in% hitList, ] 
+
+#Create a color bar to distinguish sample groups
+datMat <- datMat[,order(names(datMat))]
+
+library(RColorBrewer)
+my_group <- data.frame(cbind("Group" = astro_metadata$condition, "File" = astro_metadata$file))
+my_group <- column_to_rownames(my_group, var = "File")
+
+library(pheatmap)
+pheatmap(
+  as.matrix(datMat), scale="row", annotation_col = my_group,
+  width = 5, height = 8,
+   color=colorRampPalette(c("#1982c4", "white", "#ff595e"))(50),
+  show_rownames = FALSE, show_colnames = FALSE,
+  Rowv=as.dendrogram(hclust(dist(as.matrix(datMat)))),
+  Colv=as.dendrogram(hclust(dist(t(as.matrix(datMat))))))
+```
+
+### venn diagram
+
+```{r}
+# BiocManager::install("venndiagram")
+library(grid)
+library(ggvenn)
+library(VennDiagram)
+ggvenn(astro_dat)
+```
+
+### GSEA
+
+```{r}
+library("UniprotR")
+```
+
+```{r}
+
+astro_sigprots
+
+gsea_dat <- rownames_to_column(astro_sigprots, var = "Protein.Names")
+gsea_dat
+
+Accessions <-GetAccessionList("https://s3.amazonaws.com/csvpastebin/uploads/9571fa356c67a0c7c95e8431799a051a/Accessions.csv") 
+
+
+
+gsea_final <- left_join(gsea_dat, rawdata_wo_contam, by = "Protein.Names") %>% select(colnames(gsea_dat), "Protein.Ids")
+
+GeneOntologyObj <- GetProteinGOInfo(gsea_final[1:20,]$Protein.Ids) 
+#Plot Biological process information top 10 go terms  
+PlotGOBiological(GeneOntologyObj, Top = 10) 
+#Plot molecular function information top 20 go terms
+Plot.GOMolecular(GeneOntologyObj, Top = 20)
+#Plot subcellualr localization information 
+Plot.GOSubCellular(GeneOntologyObj) 
+#Combine Gene ontology plots into one plot 
+PlotGoInfo(GeneOntologyObj)
+#Handy visualization for publi
+
+write_csv(gsea_final, "sig_prots_20240502.csv")
+
+GETSeqFastaUniprot(Accessions = gsea_final[1:20,]$Protein.Ids, FileName = "Acclist")
+
+Enrichment.REAC(gsea_final$Protein.Ids, top = 20)
+
+Pathway.Enr(gsea_final[1:100,]$Protein.Ids)
+
+
+pathology_obj <- GetPathology_Biotech(gsea_final[1:20,]$Protein.Ids)
+diseases <- Get.diseases(pathology_obj)           
+diseases
+                                   
+
+
+```
+
+```{r}
+```
