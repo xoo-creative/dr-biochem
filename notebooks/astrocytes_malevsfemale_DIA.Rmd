@@ -15,7 +15,7 @@ library(tidyverse)
 
 ```{r}
 #protein data
-astro_rawdata <- read_tsv(file = '../data/20240226_primary_astrocytes_malevsfemale_bulk_original_TT.tsv')
+astro_rawdata <- read_tsv(file='../data/20240226_primary_astrocytes_malevsfemale_bulk_original_TT.tsv')
 
 nrow(astro_rawdata)
 #meta data
@@ -26,9 +26,11 @@ astro_metadata <- read_tsv(file = '../data/20240226_primary_astrocytes_malevsfem
 
 #### 1. remove contamination
 
-#### 2. log transformation if required
+#### 2. Remove the "\_HUMAN" off the Protein Names
 
-#### 3. data imputation
+#### 3. log transformation if required
+
+#### 4. data imputation
 
 ```{r}
 #1. remove contamination
@@ -45,29 +47,31 @@ astro_protein_descriptions <- data.frame(cbind("Description" = astro_dat$First.P
 astro_dat_numeric <- select(astro_dat, -c(First.Protein.Description, Protein.Ids, Protein.Group, Genes))
 astro_dat <- log2(astro_dat_numeric)
 
-#4. imputation
-# astro_data$na_count <- rowSums(is.na(astro_data))
-# naid <- which(astro_data$na_count == ncol(astro_data)-1)
-# astro_data <- astro_data[-naid,-7] 
-# rownames(astro_data) <- rownames(data_shorten)[-naid]
-# astro_data_bpca <- pca(astro_data, method = "bpca", center = TRUE, nPcs = 5, completeObs = TRUE, scale = "vector")
-# astro_data_bpca <- as.data.frame(astro_data_bpca@completeObs)
-# rownames(astro_data_bpca) <- rownames(astro_data)
-# hist(as.matrix(astro_data_bpca), breaks = 100)
+#4. filter
+#make a new column counting the number of "NA" values
+count <- rowSums(is.na(astro_dat))
+astro_dat <- data.frame(cbind(astro_dat, "Count" = count))
 
+#Adjust the threshold at your discretion. 
+#Here, I am allowing up to 2 protein observations to be "NA"
+astro_dat <- subset(astro_dat, Count < 2)
+astro_dat <- subset(astro_dat, select = -c(Count)) #Remove count variable
+
+#5. imputation
+library(pcaMethods)
+
+datafilt <- pca(astro_dat, method = "bpca", center = TRUE, nPcs = 5, completeObs = TRUE, scale = "vector")
+datafilt <- as.data.frame(datafilt@completeObs)
+rownames(datafilt) <- rownames(astro_dat)
+hist(as.matrix(datafilt), breaks = 100)
+length(datafilt[datafilt <= 7])
+
+#write.csv(datafilt, file = "20240509_astrocyte_LucyChi.csv")
 ```
 
 ### quality control
 
 ```{r}
-#make a new column counting the number of "NA" values
-count <- rowSums(is.na(astro_dat))
-datafilt <- data.frame(cbind(astro_dat, "Count" = count))
-
-#Adjust the threshold at your discretion. 
-#Here, I am allowing up to 2 protein observations to be "NA"
-datafilt <- subset(datafilt, Count < 2)
-datafilt <- subset(datafilt, select = -c(Count)) #Remove count variable
 
 #histogram
  heatmap(
@@ -80,32 +84,24 @@ datafilt <- subset(datafilt, select = -c(Count)) #Remove count variable
 ### PCA
 
 ```{r}
-
+library(ggplot2)
+library(ggfortify)
 data_filt_pca <- t(datafilt) %>% as.data.frame()
 
 ## replace NA with 0
 data_filt_pca[is.na(data_filt_pca)] <- 0
-
-## A way you can check which column has all the same values (if any)
-# which(apply(data.filt.pca, 2, var)==0)
-
-# data.filt.pca = data.filt.pca %>% select(-c(rowname))
-
-# data_filt_pca %>% head()
 
 p <- prcomp(data_filt_pca, scale = TRUE)
 
 data_filt_pca = rownames_to_column(data_filt_pca)
 data_filt_pca$condition = c("F", "F", "F", "F", "F", "F", "M", "M", "M", "M", "M", "M")
 
-autoplot(p, data=data_filt_pca, colour = "condition", fill_color = c(
-  'green', 'black'
-))
+autoplot(p, data=data_filt_pca, colour = "condition", frame = TRUE, frame.type = 'norm')
 ```
 
 ```{r}
 #check for metadata order
-astro_names <- colnames(astro_dat)
+astro_names <- colnames(datafilt)
 colnames(datafilt) <- astro_names
 colnames(datafilt) == astro_metadata$file #if false - order them
 
@@ -125,37 +121,44 @@ desMat <- model.matrix(~condition, astro_metadata)
 
 #Call limma
 fit <- lmFit(datafilt, desMat)
+contrast <- makeContrasts("conditionmale", levels = desMat)
 colnames(fit)
-tmp <- eBayes(fit)
-astro_prots <- topTable(tmp, coef = "conditionmale", n = Inf)
-astro_sigprots <- topTable(tmp, coef = "conditionmale", n = Inf, p.value = 0.01)
+fit.con <- contrasts.fit(fit, contrast)
+tmp <- eBayes(fit.con)
+astro_prots <- topTable(tmp, n = Inf)
+astro_sigprots <- astro_prots[which(astro_prots$adj.P.Val <= 0.05 & abs(astro_prots$logFC) >= 1),]
+sigprots <- astro_prots[which(astro_prots$adj.P.Val <= 0.05),]
+prots <- rownames_to_column(astro_prots, var = "protein.names")
+
+glimmaMA(tmp)
 
 ```
 
 ```{r}
-#library(ggrepel)
+library(ggrepel)
 
 # add a column of NAs
 astro_prots$diffexpressed <- "NO"
 # if log2Foldchange > 0.6 and pvalue < 0.05, set as "UP" 
-astro_prots$diffexpressed[astro_prots$logFC > 0 & astro_prots$adj.P.Val < 0.01] <- "UP"
+astro_prots$diffexpressed[astro_prots$logFC > 1 & astro_prots$adj.P.Val < 0.05] <- "UP"
 # if log2Foldchange < -0.6 and pvalue < 0.05, set as "DOWN"
-astro_prots$diffexpressed[astro_prots$logFC < 0 & astro_prots$adj.P.Val < 0.01] <- "DOWN"
+astro_prots$diffexpressed[astro_prots$logFC < -1 & astro_prots$adj.P.Val < 0.05] <- "DOWN"
 
-astro_prots$delabel <- NA
-astro_prots$name <- row.names(astro_prots)
-astro_prots$delabel[astro_prots$diffexpressed != "NO"] <- astro_prots$name[astro_prots$diffexpressed != "NO"]
 
-ggplot(data=astro_prots, aes(x=logFC, y=-log10(adj.P.Val), col=diffexpressed, label=delabel)) + geom_point() + theme_minimal() + geom_text_repel(size = 3, colour = "darkgrey", max.overlaps = 40) +
+astro_prots$delabel <- row.names(astro_prots)
+astro_prots$delabel[astro_prots$diffexpressed != "NO"] <- astro_prots$delabel[astro_prots$diffexpressed != "NO"]
+
+ggplot(data=astro_prots, aes(x=logFC, y=-log10(adj.P.Val), col=diffexpressed, label = delabel)) + geom_point() + theme_minimal() + geom_text_repel(size = 2.5, colour = "darkgrey", max.overlaps = 50) +
          scale_color_manual(values=c("#ff595e", "gray", "#1982c4")) +
-        geom_vline(xintercept=0, col="gray20") +
-        geom_hline(yintercept=-log10(0.01), col="gray20")
+        geom_vline(xintercept=c(-1, 1), col="gray20") +
+        geom_hline(yintercept=-log10(0.05), col="gray20")
 ```
 
-```{r}
+### heatmaps
 
+```{r}
 hitList <- rownames(astro_sigprots)
-datMat <- astro_dat[rownames(astro_dat) %in% hitList, ] 
+datMat <- datafilt[rownames(datafilt) %in% hitList, ] 
 
 #Create a color bar to distinguish sample groups
 datMat <- datMat[,order(names(datMat))]
@@ -164,24 +167,197 @@ library(RColorBrewer)
 my_group <- data.frame(cbind("Group" = astro_metadata$condition, "File" = astro_metadata$file))
 my_group <- column_to_rownames(my_group, var = "File")
 
+rownames(my_group) <- colnames(datMat)
+
 library(pheatmap)
+pheatmap(
+  as.matrix(datafilt), scale="row", annotation_col = my_group,
+  width = 5, height = 8,
+   color=colorRampPalette(c("#2A9D8F", "white", "#93032E"))(50),
+  show_rownames = FALSE, show_colnames = FALSE,
+  Rowv=as.dendrogram(hclust(dist(as.matrix(datafilt)))),
+  Colv=as.dendrogram(hclust(dist(t(as.matrix(datafilt))))))
+
+```
+
+```{r}
+library(msigdbr)
+#load immune database
+IMMUNE.human.db <- msigdbr(species = "human", 
+                           category = "C7", 
+                           subcategory = "IMMUNESIGDB")
+
+immune_proteins <- filter(heatmap_dat, protein  %in% IMMUNE.human.db$human_gene_symbol)
+
+# immune_lol <- IMMUNE.human.db %>% 
+#   dplyr :: select(gene_symbol, gs_name) 
+# # %>% 
+#   make.gs.lol()
+# 
+# #Gene set enrichment analysis with fgsea(). 
+# IMMUNE.fgsea <- fgsea::fgsea(pathways = immune_lol, stats = deg.ranks, scoreType = "pos")
+# 
+# #Show top 5 genes for each pathway:
+# # Here, we are "pasting" the first five genes in the leadingEdge column
+# IMMUNE.fgsea[,
+#            topGenes := paste0(head(unlist(`leadingEdge`), 5), collapse=", "),
+#            by = .(pathway)]
+# 
+# #Show result in table. 
+# IMMUNE.fgsea %>%
+#     arrange(pval) %>%
+#     head(10) %>% 
+#     dplyr::select(-leadingEdge) %>% 
+#     knitr::kable()
+# 
+# # filter significant pathways. Set p<0.05. 
+# IMMUNE_significant_pathways <- IMMUNE.fgsea[padj < 0.05]
+# IMMUNE_significant_pathways
+```
+
+```{r}
+#heatmap breakdown
+
+## significant proteins
 pheatmap(
   as.matrix(datMat), scale="row", annotation_col = my_group,
   width = 5, height = 8,
-   color=colorRampPalette(c("#1982c4", "white", "#ff595e"))(50),
+   color=colorRampPalette(c("#2A9D8F", "white", "#93032E"))(50),
   show_rownames = FALSE, show_colnames = FALSE,
   Rowv=as.dendrogram(hclust(dist(as.matrix(datMat)))),
   Colv=as.dendrogram(hclust(dist(t(as.matrix(datMat))))))
+
+## immune proteins
+
+heatmap_dat <- rownames_to_column(datafilt, var = "protein")
+heatmap_immune <- filter(heatmap_dat, protein  %in% c('IL33', 'IL18', 'IL9', 'ILF2', 'ILF3', 'ILEU', 'DRB1', 'DRB5', 'DRB3', 'ISG15', 'JAK1', 'JAK2', 'IFI44', 'IFIT1', 'IFIT3', 'IFIT5', 'NFKB2', 'IKKB', 'JUN', 'STAT1', 'STAT2', 'STAT3', 'STAT6'))
+
+
+heatmap_immune <- column_to_rownames(heatmap_immune, var = "protein")
+
+pheatmap(
+  as.matrix(heatmap_immune), scale="row", annotation_col = my_group,
+  width = 5, height = 8,
+   color=colorRampPalette(c("#2A9D8F", "white", "#93032E"))(50),
+  show_rownames = TRUE, show_colnames = FALSE,
+  Rowv=as.dendrogram(hclust(dist(as.matrix(heatmap_immune)))),
+  Colv=as.dendrogram(hclust(dist(t(as.matrix(heatmap_immune))))))
 ```
 
-### venn diagram
+### barplots
 
 ```{r}
-# BiocManager::install("venndiagram")
-library(grid)
-library(ggvenn)
-library(VennDiagram)
-ggvenn(astro_dat)
+# top10 proteins
+hitList <- rownames(astro_sigprots)
+topTen <- hitList[1:10]
+topTenPlots <- subset(datafilt, rownames(datafilt) %in% topTen)
+topTenPlots.t <- data.frame(t(topTenPlots))
+topTenPlots.t <- topTenPlots.t[order(row.names(topTenPlots.t)), ]
+topTenPlots.t <- cbind(topTenPlots.t, "Group" = astro_metadata$condition, "File" = astro_metadata$file)
+rownames(topTenPlots.t) <- NULL 
+topTenPlots.t <- column_to_rownames(topTenPlots.t, var = "File")
+library(reshape2)
+topTenPlots.long <- melt(topTenPlots.t, id.vars = "Group")
+
+ggplot(topTenPlots.long, aes(x = Group, y = value, fill = Group)) +
+  geom_boxplot(outlier.shape = NA, lwd = .5, show.legend = TRUE)+
+  geom_point(position = position_jitterdodge(jitter.width = .3,
+                                             dodge.width = .75), 
+             size = .5, alpha = 0.5, 
+             show.legend = TRUE) +
+  scale_y_continuous(name = "Protein abundance\n(log2(LFQ intensity))") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        axis.title.y = element_text(size = 10),
+        axis.title.x = element_text(size = 10),
+        axis.text.y = element_text(colour="black", size = 10),
+        axis.text.x = element_text(colour="black", size = 10),
+        axis.line = element_line(size=0.5, colour = "black")) +
+  scale_fill_brewer(palette = "Paired")+
+  theme(plot.margin = margin(0,1,0,0, "cm"))+
+  theme(axis.text.x = element_text(angle = -50, hjust = 0))+
+  facet_wrap(~variable)
+
+
+
+```
+
+```{r}
+# sex-based proteins
+
+sexprot <- c("CRF", "DDX3Y", "DDX3X", "ZFX;ZFY")
+sexPlots <- subset(datafilt, rownames(datafilt) %in% sexprot)
+sexPlots.t <- data.frame(t(sexPlots))
+sexPlots.t <- sexPlots.t[order(row.names(sexPlots.t)), ]
+sexPlots.t <- cbind(sexPlots.t, "Group" = astro_metadata$condition, "File" = astro_metadata$file)
+rownames(sexPlots.t) <- NULL 
+sexPlots.t <- column_to_rownames(sexPlots.t, var = "File")
+sexPlots.long <- melt(sexPlots.t, id.vars = "Group")
+#library(reshape2)
+#library(ggsignif)
+
+
+
+p_values <- data.frame(
+  variable = c("DDX3X", "DDX3Y", "CRF", "ZFX.ZFY"),
+  annotation = c("adj.p = 0.018", "adj.p = 0.00016", "adj.p = 0.95e-13", "adj.p = 0.0074"),
+  y_position = c(19, 19, 19, 19)  # Adjust these based on your scale
+)
+
+
+ggplot(sexPlots.long, aes(x = Group, y = value, fill = Group, color=Group)) +
+  geom_boxplot(outlier.shape = NA, lwd = .5, show.legend = TRUE)+
+  geom_point(position = position_jitterdodge(jitter.width = .3,
+                                             dodge.width = .75), 
+             size = .5, alpha = 1, 
+             show.legend = TRUE) +
+  theme_bw() +
+   theme(panel.grid.major = element_blank(),
+  #       panel.grid.minor = element_blank(),
+  #       panel.border = element_blank(),
+  #       panel.background = element_blank(),
+  #       axis.title.y = element_text(size = 10),
+  #       axis.title.x = element_text(size = 10),
+         axis.text.y = element_text(colour="black", size = 10),
+         axis.text.x = element_text(colour="black", size = 10),
+         axis.line = element_line(size=0.5, colour = "black")) +
+  # scale_fill_brewer(palette = "Paired")+
+    scale_fill_manual(values=c("#FF595E", "#1982C4"))+
+  scale_color_manual(values=c("#FF595E", "#1982C4"))+
+   theme(plot.margin = margin(0,1,0,0, "cm"))+
+   theme(axis.text.x = element_text(angle = -50, hjust = 0))+
+   facet_wrap(~variable) +
+  geom_signif(data = p_values, aes(xmin = 1, xmax = 2,annotations = annotation, y_position = y_position), 
+              manual = TRUE, inherit.aes = FALSE, 
+              tip_length = 0.02, textsize = 3, vjust = -0.5) + ylim(5, 22)
+  
+  
+  
+  
+    # geom_signif(comparisons = list(c("female", "male")), colour = "black",
+    #            annotations = "0.05", 
+    #            tip_length = 0.02, 
+    #            y_position = c(18),  
+    #            textsize = 3, 
+    #            vjust = -0.5
+    #            ) +ylab("Protein abundance\n(log2(LFQ intensity))") + ylim(6,20)
+
+```
+
+```{r}
+p1 <- ggplot(mpg, aes(class, hwy)) +
+  geom_boxplot() +
+  geom_signif(
+    comparisons = list(c("compact", "midsize"), c("minivan", "suv")),
+    map_signif_level = TRUE, textsize = 6
+  ) +
+  ylim(NA, 48)
+p1
+
+mpg
 ```
 
 ### GSEA
@@ -192,18 +368,21 @@ library("UniprotR")
 
 ```{r}
 
-astro_sigprots
+astro_sigprots_pos <- astro_sigprots %>% filter(logFC > 0)
+astro_sigprots_neg <- astro_sigprots %>% filter(logFC < 0)
 
-gsea_dat <- rownames_to_column(astro_sigprots, var = "Protein.Names")
-gsea_dat
+gsea_dat_pos <- rownames_to_column(astro_sigprots_pos, var = "Protein.Names")
+gsea_dat_neg <- rownames_to_column(astro_sigprots_neg, var = "Protein.Names")
 
 Accessions <-GetAccessionList("https://s3.amazonaws.com/csvpastebin/uploads/9571fa356c67a0c7c95e8431799a051a/Accessions.csv") 
 
 
 
-gsea_final <- left_join(gsea_dat, rawdata_wo_contam, by = "Protein.Names") %>% select(colnames(gsea_dat), "Protein.Ids")
+gsea_final_pos <- left_join(gsea_dat_pos, rawdata_wo_contam, by = "Protein.Names") %>% select(colnames(gsea_dat_pos), "Protein.Ids")
 
-GeneOntologyObj <- GetProteinGOInfo(gsea_final[1:20,]$Protein.Ids) 
+gsea_final_neg <- left_join(gsea_dat_neg, rawdata_wo_contam, by = "Protein.Names") %>% select(colnames(gsea_dat_neg), "Protein.Ids")
+
+GeneOntologyObj <- GetProteinGOInfo(gsea_final_pos[1:20,]$Protein.Ids) 
 #Plot Biological process information top 10 go terms  
 PlotGOBiological(GeneOntologyObj, Top = 10) 
 #Plot molecular function information top 20 go terms
@@ -218,7 +397,8 @@ write_csv(gsea_final, "sig_prots_20240502.csv")
 
 GETSeqFastaUniprot(Accessions = gsea_final[1:20,]$Protein.Ids, FileName = "Acclist")
 
-Enrichment.REAC(gsea_final$Protein.Ids, top = 20)
+Enrichment.REAC(gsea_final_pos$Protein.Ids, top = 20)
+Enrichment.REAC(gsea_final_neg$Protein.Ids, top = 20)
 
 Pathway.Enr(gsea_final[1:100,]$Protein.Ids)
 
@@ -232,4 +412,7 @@ diseases
 ```
 
 ```{r}
+Enrichment.REAC(gsea_final_pos$Protein.Ids, top = 20)
+Enrichment.REAC(gsea_final_neg$Protein.Ids, top = 20)
+
 ```
