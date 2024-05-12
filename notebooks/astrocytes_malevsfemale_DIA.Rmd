@@ -17,7 +17,6 @@ library(tidyverse)
 #protein data
 astro_rawdata <- read_tsv(file='../data/20240226_primary_astrocytes_malevsfemale_bulk_original_TT.tsv')
 
-nrow(astro_rawdata)
 #meta data
 astro_metadata <- read_tsv(file = '../data/20240226_primary_astrocytes_malevsfemale_bulk_TT_metadata.tsv')
 ```
@@ -116,7 +115,7 @@ colnames(datafilt) == astro_metadata$file #if false - order them
 ### limma
 
 ```{r}
-#library(limma)
+library(limma)
 desMat <- model.matrix(~condition, astro_metadata)
 
 #Call limma
@@ -129,8 +128,15 @@ astro_prots <- topTable(tmp, n = Inf)
 astro_sigprots <- astro_prots[which(astro_prots$adj.P.Val <= 0.05 & abs(astro_prots$logFC) >= 1),]
 sigprots <- astro_prots[which(astro_prots$adj.P.Val <= 0.05),]
 prots <- rownames_to_column(astro_prots, var = "protein.names")
+male_sigprots <- filter(sigprots, logFC > 0)
+female_sigprots <- filter(sigprots, logFC < 0)
+astro_sigprots_names <- rownames_to_column(astro_sigprots, var = "ID")
 
-glimmaMA(tmp)
+write_tsv(astro_sigprots_names, file = "20240226_astro_sigprots.tsv")
+#write_tsv(male_sigprots, file = "20240226_male_sigprots.tsv")
+#write_tsv(female_sigprots, file = "20240226_female_sigprots.tsv")
+
+#glimmaMA(tmp)
 
 ```
 
@@ -268,15 +274,17 @@ ggplot(topTenPlots.long, aes(x = Group, y = value, fill = Group)) +
   scale_y_continuous(name = "Protein abundance\n(log2(LFQ intensity))") +
   theme_bw() +
   theme(panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        panel.border = element_blank(),
-        panel.background = element_blank(),
+        # panel.grid.minor = element_blank(),
+        # panel.border = element_blank(),
+        # panel.background = element_blank(),
         axis.title.y = element_text(size = 10),
         axis.title.x = element_text(size = 10),
         axis.text.y = element_text(colour="black", size = 10),
         axis.text.x = element_text(colour="black", size = 10),
         axis.line = element_line(size=0.5, colour = "black")) +
-  scale_fill_brewer(palette = "Paired")+
+ # scale_fill_brewer(palette = "Paired")+
+      scale_fill_manual(values=c("#FF595E", "#1982C4"))+
+  scale_color_manual(values=c("#FF595E", "#1982C4"))+
   theme(plot.margin = margin(0,1,0,0, "cm"))+
   theme(axis.text.x = element_text(angle = -50, hjust = 0))+
   facet_wrap(~variable)
@@ -286,6 +294,9 @@ ggplot(topTenPlots.long, aes(x = Group, y = value, fill = Group)) +
 ```
 
 ```{r}
+library(reshape2)
+library(ggsignif)
+
 # sex-based proteins
 
 sexprot <- c("CRF", "DDX3Y", "DDX3X", "ZFX;ZFY")
@@ -296,9 +307,6 @@ sexPlots.t <- cbind(sexPlots.t, "Group" = astro_metadata$condition, "File" = ast
 rownames(sexPlots.t) <- NULL 
 sexPlots.t <- column_to_rownames(sexPlots.t, var = "File")
 sexPlots.long <- melt(sexPlots.t, id.vars = "Group")
-#library(reshape2)
-#library(ggsignif)
-
 
 
 p_values <- data.frame(
@@ -333,34 +341,37 @@ ggplot(sexPlots.long, aes(x = Group, y = value, fill = Group, color=Group)) +
   geom_signif(data = p_values, aes(xmin = 1, xmax = 2,annotations = annotation, y_position = y_position), 
               manual = TRUE, inherit.aes = FALSE, 
               tip_length = 0.02, textsize = 3, vjust = -0.5) + ylim(5, 22)
-  
-  
-  
-  
-    # geom_signif(comparisons = list(c("female", "male")), colour = "black",
-    #            annotations = "0.05", 
-    #            tip_length = 0.02, 
-    #            y_position = c(18),  
-    #            textsize = 3, 
-    #            vjust = -0.5
-    #            ) +ylab("Protein abundance\n(log2(LFQ intensity))") + ylim(6,20)
 
-```
-
-```{r}
-p1 <- ggplot(mpg, aes(class, hwy)) +
-  geom_boxplot() +
-  geom_signif(
-    comparisons = list(c("compact", "midsize"), c("minivan", "suv")),
-    map_signif_level = TRUE, textsize = 6
-  ) +
-  ylim(NA, 48)
-p1
-
-mpg
 ```
 
 ### GSEA
+
+```{r}
+#https://biit.cs.ut.ee/gprofiler/gost
+library(GOplot)
+astro_go <- read_tsv(file='../data/astrocyte_brain_gene_annotation.tsv')
+astro_gprofiler_m <- read_csv(file='../data/20240226_male_gProfiler_hsapiens_5-11-2024_6-39-03 PM__intersections.csv')
+astro_gprofiler_f <- read_csv(file='../data/20240226_female_gProfiler_hsapiens_5-11-2024_6-05-04 PM__intersections.csv')
+astro_gprofiler <- read_csv(file='../data/20240226_gprofiler_sig.csv')
+
+EC$david
+
+#GO analysis for female
+female_sigprots <- rownames_to_column(female_sigprots, var = "gene")
+female_go <- filter(female_sigprots, gene  %in% astro_go$gene) 
+
+female_go <- merge(female_go, astro_go, by = "gene")
+
+#GO analysis for male
+male_sigprots <- rownames_to_column(male_sigprots, var = "ID")
+male_go <- filter(male_sigprots, ID  %in% astro_go$gene) 
+
+#male_go <- merge(male_go, astro_go, by = "ID")
+
+# astro_circ_m <- circle_dat(astro_gprofiler_m, male_sigprots)
+# astro_circ_sig_m <- filter(astro_circ_m, adj_pval < 0.05)
+# astro_circ_top10 <- top_n(astro_circ_sig_m, 10, adj_pval)
+```
 
 ```{r}
 library("UniprotR")
@@ -415,4 +426,61 @@ diseases
 Enrichment.REAC(gsea_final_pos$Protein.Ids, top = 20)
 Enrichment.REAC(gsea_final_neg$Protein.Ids, top = 20)
 
+```
+
+### GOPlots
+
+Key notes:
+
+-   GOHeat needs unique lists of `gene` and `processes`
+
+-   GOBubble automatically filters to keep ONLY those with `-log(adj_pval)` \>= 5 (or what they call `labels=5`) which is equivalent to `adj_pval <= 0.00001`. To override this, you have to pass in your own threshold. Try `labels=1` to start with.
+
+-   GOBar needs heavy data filtering before using, or else all the bars will be buried away into tiny lines.
+
+You will see all of those in action here below:
+
+#### Set up
+
+We need `gprofiler` and the `astro_sigprots`
+
+```{r}
+astro_gprofiler <- read_csv(file='../data/20240226_gprofiler_sig.csv')
+astro_sigprots_names <- rownames_to_column(astro_sigprots, var = "ID")
+```
+
+#### GOBar
+
+```{r}
+astro_circ <- circle_dat(astro_gprofiler, astro_sigprots_names)
+
+## Filtering those with `adj_pval` == 1, cause it's noise that clogs up the plot
+astro_circ <- subset(astro_circ, adj_pval < 1)
+```
+
+```{r}
+GOBar(subset(astro_circ, category == 'GO:BP'))
+```
+
+#### GOBubble
+
+```{r}
+## Use a low value for `labels` or else all your data will be filtered out and you may get
+##     a weird error about "dimensions 0;1"
+
+GOBubble(astro_circ, labels = 1)
+```
+
+#### GOHeat
+
+```{r}
+## Need to use the **unique** lists of genes and processes. The `chord_dat` function will connect those back together for you.
+
+##  See the EC$genes and EC$processes as the example since they are both unique.
+##      chord <- chord_dat(circ, EC$genes, EC$process)
+
+chord <- chord_dat(astro_circ, unique(astro_circ$genes), unique(astro_circ$term))
+
+GOHeat(chord, nlfc = 0) # 0 for plotting counts
+GOHeat(chord, nlfc = 1) # 1 for plotting logFC
 ```
