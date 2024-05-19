@@ -1,13 +1,13 @@
-file	sample	sample_name	condition	replicate
-D:\LucyC\20240312_pri_astro_w229E_bulk_SCP_DIA\Lucy_pri_f_astro_c1_bulk_DIA_18ng_3-11-2024_Slot2-31_4280.d	f_control_1	f_control_1	f_control	1
-D:\LucyC\20240312_pri_astro_w229E_bulk_SCP_DIA\Lucy_pri_f_astro_c2_bulk_DIA_18ng_3-12-2024_Slot2-32_4281.d	f_control_2	f_control_2	f_control	2
-D:\LucyC\20240312_pri_astro_w229E_bulk_SCP_DIA\Lucy_pri_f_astro_c3_bulk_DIA_18ng_3-12-2024_Slot2-33_4282.d	f_control_3	f_control_3	f_control	3
-D:\LucyC\20240312_pri_astro_w229E_bulk_SCP_DIA\Lucy_pri_f_astro_v1_bulk_DIA_18ng_3-12-2024_Slot2-34_4283.d	f_wvirus_1	f_wvirus_1	f_wvirus	1
-D:\LucyC\20240312_pri_astro_w229E_bulk_SCP_DIA\Lucy_pri_f_astro_v2_bulk_DIA_18ng_3-12-2024_Slot2-35_4284.d	f_wvirus_2	f_wvirus_2	f_wvirus	2
-D:\LucyC\20240312_pri_astro_w229E_bulk_SCP_DIA\Lucy_pri_f_astro_v3_bulk_DIA_18ng_3-12-2024_Slot2-36_4285.d	f_wvirus_3	f_wvirus_3	f_wvirus	3
-D:\LucyC\20240312_pri_astro_w229E_bulk_SCP_DIA\Lucy_pri_m_astro_c1_bulk_DIA_18ng_3-11-2024_Slot2-25_4274.d	m_control_1	m_control_1	m_control	1
-D:\LucyC\20240312_pri_astro_w229E_bulk_SCP_DIA\Lucy_pri_m_astro_c2_bulk_DIA_18ng_3-11-2024_Slot2-26_4275.d	m_control_2	m_control_2	m_control	2
-D:\LucyC\20240312_pri_astro_w229E_bulk_SCP_DIA\Lucy_pri_m_astro_c3_bulk_DIA_18ng_3-11-2024_Slot2-27_4276.d	m_control_3	m_control_3	m_control	3
-D:\LucyC\20240312_pri_astro_w229E_bulk_SCP_DIA\Lucy_pri_m_astro_v1_bulk_DIA_18ng_3-11-2024_Slot2-28_4277.d	m_wvirus_1	m_wvirus_1	m_wvirus	1
-D:\LucyC\20240312_pri_astro_w229E_bulk_SCP_DIA\Lucy_pri_m_astro_v2_bulk_DIA_18ng_3-11-2024_Slot2-29_4278.d	m_wvirus_2	m_wvirus_2	m_wvirus	2
-D:\LucyC\20240312_pri_astro_w229E_bulk_SCP_DIA\Lucy_pri_m_astro_v3_bulk_DIA_18ng_3-11-2024_Slot2-30_4279.d	m_wvirus_3	m_wvirus_3	m_wvirus	3
+file	sample	sample_name	sex	treatment	condition	replicate
+f_control_1	f_control_1	f_control_1	female	control	female_cont	1
+f_control_2	f_control_2	f_control_2	female	control	female_cont	2
+f_control_3	f_control_3	f_control_3	female	control	female_cont	3
+f_wvirus_1	f_wvirus_1	f_wvirus_1	female	virus	female_virus	1
+f_wvirus_2	f_wvirus_2	f_wvirus_2	female	virus	female_virus	2
+f_wvirus_3	f_wvirus_3	f_wvirus_3	female	virus	female_virus	3
+m_control_1	m_control_1	m_control_1	male	control	male_cont	1
+m_control_2	m_control_2	m_control_2	male	control	male_cont	2
+m_control_3	m_control_3	m_control_3	male	control	male_cont	3
+m_wvirus_1	m_wvirus_1	m_wvirus_1	male	virus	male_virus	1
+m_wvirus_2	m_wvirus_2	m_wvirus_2	male	virus	male_virus	2
+m_wvirus_3	m_wvirus_3	m_wvirus_3	male	virus	male_virus	3
