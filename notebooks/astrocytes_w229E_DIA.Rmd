@@ -1,0 +1,329 @@
+---
+title: "astrocytes_w229E_DIA"
+author: "Lucy"
+date: "2024-05-14"
+output: html_document
+---
+
+```{r}
+library(readr)
+library(knitr)
+library(tidyverse)
+```
+
+### import data
+
+```{r}
+# original raw data
+astro229E_original <- read_tsv(file='../data/20240312_primary_astrocyte_w229E_bulk_SCP_original.tsv')
+
+#imputed data from fragpipe analyst 
+astro229E_rawdata <- read_csv(file='../data/20240312_Imputed_matrix.csv')
+
+#meta data
+astro229E_metadata <- read_tsv(file = '../data/20240312_primary_astrocyte_w229E_bulk_SCP_metadata.tsv')
+
+astro229E_rawdata <- column_to_rownames(astro229E_rawdata, var = "ProteinID")
+
+hist(as.matrix(astro229E_rawdata), breaks = 100)
+```
+
+### quality control
+
+```{r pressure, echo=FALSE}
+#histogram
+ heatmap(
+   as.matrix(astro229E_rawdata), 
+   Rowv=as.dendrogram(hclust(dist(as.matrix(astro229E_rawdata)))),
+   Colv=as.dendrogram(hclust(dist(t(as.matrix(astro229E_rawdata))))))
+ 
+```
+
+### PCA
+
+```{r}
+library(ggplot2)
+library(ggfortify)
+astro229E_pca <- t(astro229E_rawdata) %>% as.data.frame()
+
+p <- prcomp(astro229E_pca, scale = TRUE)
+
+astro229E_pca = rownames_to_column(astro229E_pca)
+astro229E_pca$condition = c("female_cont", "female_cont", "female_cont", "female_virus", "female_virus", "female_virus", "male_cont", "male_cont", "male_cont", "male_virus", "male_virus", "male_virus")
+
+autoplot(p, data=astro229E_pca, colour = "condition")
+```
+
+```{r}
+#check for metadata order
+astro_names <- colnames(astro229E_pca)
+colnames(astro229E_pca) <- astro_names
+colnames(astro229E_pca) == astro229E_metadata$file #if false - order them
+```
+
+### limma
+
+```{r}
+library(limma)
+
+#Call limma
+
+desMat_229E <- model.matrix(~sex + treatment, astro229E_metadata)
+fit_229E <- lmFit(astro229E_rawdata, desMat_229E)
+colnames(fit_229E)
+# contrast_229E <- makeContrasts("conditionf_wvirus", levels = desMat_229E)
+# fit.con_f <- contrasts.fit(fit_f, contrast_f)
+tmp_229E <- eBayes(fit_229E)
+astro229E_prots <- topTable(tmp_229E, number = nrow(astro229E_rawdata), coef = c("sexmale",    "treatmentvirus"))
+astro229E_sigprots <- subset(astro229E_prots, astro229E_prots$adj.P.Val < 0.05)
+
+```
+
+```{r}
+#filter protein data
+astro229E_f <- astro229E_rawdata[, 1:6]
+astro229E_m <- astro229E_rawdata[, 7:12]
+
+#filter metadata
+astro229E_f_metadata <- astro229E_metadata[1:6, ]
+astro229E_m_metadata <- astro229E_metadata[7:12, ]
+
+```
+
+```{r}
+#Call limma - female
+
+desMat_f <- model.matrix(~condition, astro229E_f_metadata)
+fit_f <- lmFit(astro229E_f, desMat_f)
+colnames(fit_f)
+contrast_f <- makeContrasts("conditionfemale_virus", levels = desMat_f)
+fit.con_f <- contrasts.fit(fit_f, contrast_f)
+tmp_f <- eBayes(fit.con_f)
+f_prots <- topTable(tmp_f, n = Inf)
+f_sigprots <- f_prots[which(f_prots$adj.P.Val <= 0.05 & abs(f_prots$logFC) >= 1),]
+f_sigprots <- rownames_to_column(f_sigprots, var = "Protein.Names")
+
+#Call limma - male
+
+desMat_m <- model.matrix(~condition, astro229E_m_metadata)
+fit_m <- lmFit(astro229E_m, desMat_m)
+colnames(fit_m)
+contrast_m <- makeContrasts("conditionmale_virus", levels = desMat_m)
+fit.con_m <- contrasts.fit(fit_m, contrast_m)
+tmp_m <- eBayes(fit.con_m)
+m_prots <- topTable(tmp_m, n = Inf)
+m_sigprots <- m_prots[which(m_prots$adj.P.Val <= 0.05 & abs(m_prots$logFC) >= 1),]
+m_sigprots <- rownames_to_column(m_sigprots, var = "Protein.Names")
+
+```
+
+### volcano plot
+
+#### female volcano plot
+
+```{r}
+library("ggrepel")
+library("EnhancedVolcano")
+
+
+keyvals_f <- ifelse(f_prots$logFC < -1 & f_prots$adj.P.Val <0.05, '#9A54AA', ifelse(f_prots$logFC > 1 & f_prots$adj.P.Val <0.05, '#FF9F1C', 'grey50'))
+keyvals_f[is.na(keyvals_f)] <- 'grey50'
+names(keyvals_f)[keyvals_f == '#9A54AA'] <- 'down-regulated'
+names(keyvals_f)[keyvals_f == 'grey50'] <- 'NS'
+names(keyvals_f)[keyvals_f == '#FF9F1C'] <- 'up-regulated'
+
+EnhancedVolcano(f_prots, lab = rownames(f_prots), 
+                x = 'logFC', 
+                y = 'adj.P.Val', 
+                selectLab = rownames(f_prots)[which(names(keyvals_f) %in% c('down-regulated', 'up-regulated'))], 
+                xlab = bquote(~log[2]~ 'fold change'), 
+                ylab = "-log10(adj.P)",
+                title = 'astrocyte female', 
+                pCutoff = 0.05, 
+                subtitle = ' ', 
+                FCcutoff = 1, 
+                pointSize = 3.0, 
+                labSize = 4, 
+                shape = c(16, 16, 16, 16), 
+                colCustom = keyvals_f, 
+                colAlpha = 1, 
+                legendPosition = 'right', 
+                legendLabSize = 10, 
+                legendIconSize = 4.0, 
+                drawConnectors = TRUE, 
+                widthConnectors = 0.75, 
+                gridlines.major = FALSE, 
+                gridlines.minor = FALSE, 
+                border = 'partial', 
+                borderWidth = 1.5, 
+                borderColour = 'black')
+```
+
+#### male volcano plot
+
+```{r}
+keyvals_m <- ifelse(m_prots$logFC < -1 & f_prots$adj.P.Val <0.05, '#9A54AA', ifelse(m_prots$logFC > 1 & m_prots$adj.P.Val <0.05, '#FF9F1C', 'grey50'))
+keyvals_m[is.na(keyvals_m)] <- 'grey50'
+names(keyvals_m)[keyvals_m == '#9A54AA'] <- 'down-regulated'
+names(keyvals_m)[keyvals_m == 'grey50'] <- 'NS'
+names(keyvals_m)[keyvals_m == '#FF9F1C'] <- 'up-regulated'
+
+EnhancedVolcano(m_prots, lab = rownames(m_prots), 
+                x = 'logFC', 
+                y = 'adj.P.Val', 
+                selectLab = rownames(m_prots)[which(names(keyvals_m) %in% c('down-regulated', 'up-regulated'))], 
+                xlab = bquote(~log[2]~ 'fold change'), 
+                ylab = "-log10(adj.P)",
+                title = 'astrocyte male', 
+                pCutoff = 0.05, 
+                subtitle = ' ', 
+                FCcutoff = 1, 
+                pointSize = 3.0, 
+                labSize = 4, 
+                shape = c(16, 16, 16, 16), 
+                colCustom = keyvals_m, 
+                colAlpha = 1, 
+                legendPosition = 'right', 
+                legendLabSize = 10, 
+                legendIconSize = 4.0, 
+                drawConnectors = TRUE, 
+                widthConnectors = 0.75, 
+                gridlines.major = FALSE, 
+                gridlines.minor = FALSE, 
+                border = 'partial', 
+                borderWidth = 1.5, 
+                borderColour = 'black')
+```
+
+### heatmaps
+
+```{r}
+hitList_229E <- rownames(astro229E_prots)
+datMat_229E <- astro229E_rawdata[rownames(astro229E_rawdata) %in% hitList_229E, ] 
+
+#Create a color bar to distinguish sample groups
+datMat_229E <- datMat_229E[,order(names(datMat_229E))]
+
+library(RColorBrewer)
+my_group_229E <- data.frame(cbind("Group" = astro229E_metadata$condition, "File" = astro229E_metadata$file))
+my_group_229E <- column_to_rownames(my_group_229E, var = "File")
+
+rownames(my_group_229E) <- colnames(datMat_229E)
+
+library(pheatmap)
+annoCol<-list(Group=c(female_cont="#FF595E", female_virus="#FCCCAC", male_cont="#1982C4", male_virus ="#8BCAC0"))
+
+pheatmap(
+  as.matrix(astro229E_rawdata), scale="row", annotation_col = my_group_229E,
+  width = 5, height = 8,
+  annotation_colors = annoCol,
+  color=colorRampPalette(c("#9A54AA", "white", "#FF9F1C"))(50),
+  show_rownames = FALSE, show_colnames = FALSE,
+  Rowv=as.dendrogram(hclust(dist(as.matrix(astro229E_rawdata)))),
+  Colv=as.dendrogram(hclust(dist(t(as.matrix(astro229E_rawdata))))))
+
+```
+
+```{r}
+heatmap_229E <- rownames_to_column(astro229E_rawdata, var = "protein")
+heatmap_innate_229E <- filter(heatmap_229E, protein  %in% c('IRAK1', 'IRAK4', 'TAB1', 'TAB2', 'TAB3', 'TRAF6', 'NFKB1', 'NFKB2', 'ISG15', 'JAK1', 'JAK2', 'IFI44', 'IFIT1', 'IFIT3', 'IFIT5', 'IKKB', 'JUN', 'STAT1', 'STAT2', 'STAT3', 'STAT6', "IRF2", "IRF3", "IRF9", "TLR3", 'IRF2BP1', 'IRF2BP2', 'IRF2BPL'))
+
+heatmap_innate_229E <- column_to_rownames(heatmap_innate_229E, var = "protein")
+
+annoCol<-list(Group=c(female_cont="#FF595E", female_virus="#FCCCAC", male_cont="#1982C4", male_virus ="#8BCAC0"))
+
+pheatmap(
+  as.matrix(heatmap_innate_229E), scale="row", annotation_col = my_group_229E,
+  width = 5, height = 8,
+  color=colorRampPalette(c("#9A54AA", "white", "#FF9F1C"))(50),
+  annotation_colors = annoCol,
+  show_rownames = TRUE, show_colnames = FALSE,
+  Rowv=as.dendrogram(hclust(dist(as.matrix(heatmap_immune_229E)))),
+  Colv=as.dendrogram(hclust(dist(t(as.matrix(heatmap_immune_229E))))))
+```
+
+```{r}
+heatmap_immune_229E <- filter(heatmap_229E, protein  %in% c( 'IL33', 'IL18', 'IL9', 'ILF2', 'ILF3', 'ILEU', 'HLA-DRB5', 'HLA-DRB1', 'HLA-DRB3', 'CXCL4', 'CXCL8', 'CXCR4'))
+
+heatmap_immune_229E <- column_to_rownames(heatmap_immune_229E, var = "protein")
+
+annoCol<-list(Group=c(female_cont="#FF595E", female_virus="#FCCCAC", male_cont="#1982C4", male_virus ="#8BCAC0"))
+
+pheatmap(
+  as.matrix(heatmap_immune_229E), scale="row", annotation_col = my_group_229E,
+  width = 5, height = 8,
+  color=colorRampPalette(c("#9A54AA", "white", "#FF9F1C"))(50),
+  annotation_colors = annoCol,
+  show_rownames = TRUE, show_colnames = FALSE,
+  Rowv=as.dendrogram(hclust(dist(as.matrix(heatmap_immune_229E)))),
+  Colv=as.dendrogram(hclust(dist(t(as.matrix(heatmap_immune_229E))))))
+```
+
+### bar plots
+
+```{r}
+library(reshape2)
+library(ggsignif)
+
+# sex-based proteins
+
+sex_229Eprot <- c("DDX3Y", "DDX3X")
+sex_229EPlots <- subset(astro229E_rawdata, rownames(astro229E_rawdata) %in% sex_229Eprot)
+sex_229EPlots.t <- data.frame(t(sex_229EPlots))
+sex_229EPlots.t <- sex_229EPlots.t[order(row.names(sex_229EPlots.t)), ]
+sex_229EPlots.t <- cbind(sex_229EPlots.t, "Group" = astro229E_metadata$condition, "File" = astro229E_metadata$file)
+rownames(sex_229EPlots.t) <- NULL 
+sex_229EPlots.t <- column_to_rownames(sex_229EPlots.t, var = "File")
+sex_229EPlots.long <- melt(sex_229EPlots.t, id.vars = "Group")
+
+
+p_values_229E <- data.frame(
+  variable = c("DDX3X", "DDX3Y"),
+  annotation = c("adj.p = 0.018", "adj.p = 0.00016"),
+  y_position = c(19, 19)  # Adjust these based on your scale
+)
+
+
+ggplot(sex_229EPlots.long, aes(x = Group, y = value, fill = Group, color=Group)) +
+  geom_boxplot(outlier.shape = NA, lwd = .5, show.legend = TRUE)+
+  geom_point(position = position_jitterdodge(jitter.width = .3,
+                                             dodge.width = .75), 
+             size = .5, alpha = 1, 
+             show.legend = TRUE) +
+  theme_bw() +
+   theme(panel.grid.major = element_blank(),
+  #       panel.grid.minor = element_blank(),
+  #       panel.border = element_blank(),
+  #       panel.background = element_blank(),
+        axis.title.y = element_text(size = 10),
+        axis.title.x = element_text(size = 10),
+         axis.text.y = element_text(colour="black", size = 10),
+         axis.text.x = element_text(colour="black", size = 10),
+         axis.line = element_line(size=0.5, colour = "black")) +
+  # scale_fill_brewer(palette = "Paired")+
+    scale_fill_manual(values=c("#FF595E",  "#FCCCAC", "#1982C4","#8BCAC0"))+
+  scale_color_manual(values=c("#FF595E",  "#FCCCAC", "#1982C4","#8BCAC0"))+
+   theme(plot.margin = margin(0,1,0,0, "cm"))+
+   theme(axis.text.x = element_text(angle = -50, hjust = 0))+
+   facet_wrap(~variable) 
+
+##  DDX3X is significant within sex - DDX3X is implicated in antiviral signalling pathways
+```
+
+### GSEA
+
+```{r}
+library("UniprotR")
+
+gsea_f229E <- left_join(f_sigprots, astro229E_original, by = "Protein.Names") %>% select(colnames(f_sigprots), "Protein.Ids")
+
+gsea_m229E <- left_join(m_sigprots, astro229E_original, by = "Protein.Names") %>% select(colnames(m_sigprots), "Protein.Ids")
+
+GeneOntologyObj_f229E <- GetProteinGOInfo(gsea_f229E$Protein.Ids) 
+#Plot Biological process information top 10 go terms  
+PlotGOBiological(GeneOntologyObj_f229E) 
+
+GeneOntologyObj_m229E <- GetProteinGOInfo(gsea_m229E$Protein.Ids) 
+#Plot Biological process information top 10 go terms  
+PlotGOBiological(GeneOntologyObj_m229E) 
+```

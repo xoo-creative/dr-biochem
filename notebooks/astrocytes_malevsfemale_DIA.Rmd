@@ -23,14 +23,6 @@ astro_metadata <- read_tsv(file = '../data/20240226_primary_astrocytes_malevsfem
 
 ### pre-process/cleaning data:
 
-#### 1. remove contamination
-
-#### 2. Remove the "\_HUMAN" off the Protein Names
-
-#### 3. log transformation if required
-
-#### 4. data imputation
-
 ```{r}
 #1. remove contamination
 rawdata_wo_contam <- astro_rawdata[- grep("CONT", astro_rawdata$Protein.Group),]
@@ -127,12 +119,13 @@ tmp <- eBayes(fit.con)
 astro_prots <- topTable(tmp, n = Inf)
 astro_sigprots <- astro_prots[which(astro_prots$adj.P.Val <= 0.05 & abs(astro_prots$logFC) >= 1),]
 sigprots <- astro_prots[which(astro_prots$adj.P.Val <= 0.05),]
-prots <- rownames_to_column(astro_prots, var = "protein.names")
+sigprots <- rownames_to_column(sigprots, var = "ID")
+prots <- rownames_to_column(astro_prots, var = "ID")
 male_sigprots <- filter(sigprots, logFC > 0)
 female_sigprots <- filter(sigprots, logFC < 0)
 astro_sigprots_names <- rownames_to_column(astro_sigprots, var = "ID")
 
-write_tsv(astro_sigprots_names, file = "20240226_astro_sigprots.tsv")
+#write_tsv(astro_sigprots_names, file = "20240226_astro_sigprots.tsv")
 #write_tsv(male_sigprots, file = "20240226_male_sigprots.tsv")
 #write_tsv(female_sigprots, file = "20240226_female_sigprots.tsv")
 
@@ -140,24 +133,76 @@ write_tsv(astro_sigprots_names, file = "20240226_astro_sigprots.tsv")
 
 ```
 
+### Volcano plots
+
 ```{r}
 library(ggrepel)
 
-# add a column of NAs
-astro_prots$diffexpressed <- "NO"
-# if log2Foldchange > 0.6 and pvalue < 0.05, set as "UP" 
-astro_prots$diffexpressed[astro_prots$logFC > 1 & astro_prots$adj.P.Val < 0.05] <- "UP"
-# if log2Foldchange < -0.6 and pvalue < 0.05, set as "DOWN"
-astro_prots$diffexpressed[astro_prots$logFC < -1 & astro_prots$adj.P.Val < 0.05] <- "DOWN"
+
+#BiocManager::install("EnhancedVolcano")
+library("EnhancedVolcano")
 
 
-astro_prots$delabel <- row.names(astro_prots)
-astro_prots$delabel[astro_prots$diffexpressed != "NO"] <- astro_prots$delabel[astro_prots$diffexpressed != "NO"]
+keyvals <- ifelse(astro_prots$logFC < -1, '#FF595E', ifelse(astro_prots$logFC > 1, '#1982C4', 'grey50'))
+keyvals[is.na(keyvals)] <- 'grey50'
+names(keyvals)[keyvals == '#FF595E'] <- 'female'
+names(keyvals)[keyvals == 'grey50'] <- 'NS'
+names(keyvals)[keyvals == '#1982C4'] <- 'male'
 
-ggplot(data=astro_prots, aes(x=logFC, y=-log10(adj.P.Val), col=diffexpressed, label = delabel)) + geom_point() + theme_minimal() + geom_text_repel(size = 2.5, colour = "darkgrey", max.overlaps = 50) +
-         scale_color_manual(values=c("#ff595e", "gray", "#1982c4")) +
-        geom_vline(xintercept=c(-1, 1), col="gray20") +
-        geom_hline(yintercept=-log10(0.05), col="gray20")
+#volcano with selected protein labels
+EnhancedVolcano(astro_prots,
+    lab = rownames(astro_prots),
+    x = 'logFC',
+    y = 'adj.P.Val',
+    selectLab = c('DDX3Y','DRB5', 'IL33', 'IL18', 'IL1AP', '	
+DRB1', 'DRA'),
+    xlab = bquote(~Log[2]~ 'fold change'),
+    title = 'astrocyte - significant proteins',
+    subtitle = '',
+    pCutoff = 0.05,
+    FCcutoff = 1.0,
+    pointSize = 2.0,
+    labSize = 4.0,
+    col=c('gray10', 'gray50', 'gray20', 'red3'),
+    labCol = 'black',
+    labFace = 'bold',
+    boxedLabels = TRUE,
+    colAlpha = 4/5,
+    legendPosition = 'right',
+    legendLabSize = 10,
+    legendIconSize = 4.0,
+    drawConnectors = TRUE,
+    widthConnectors = 1.0,
+    colConnectors = 'black',
+    colCustom = keyvals)
+
+
+#volcano for all significant proteins labeled
+EnhancedVolcano(astro_prots, lab = rownames(astro_prots), 
+                x = 'logFC', 
+                y = 'adj.P.Val', 
+                selectLab = rownames(astro_prots)[which(names(keyvals) %in% c('female', 'male'))], 
+                xlab = bquote(~log[2]~ 'fold change'), 
+                ylab = "-log10(adj.P)",
+                title = 'astrocyte male vs female', 
+                pCutoff = 0.05, 
+                subtitle = ' ', 
+                FCcutoff = 1, 
+                pointSize = 3.0, 
+                labSize = 4, 
+                shape = c(16, 16, 16, 16), 
+                colCustom = keyvals, 
+                colAlpha = 1, 
+                legendPosition = 'right', 
+                legendLabSize = 10, 
+                legendIconSize = 4.0, 
+                drawConnectors = TRUE, 
+                widthConnectors = 0.75, 
+                gridlines.major = FALSE, 
+                gridlines.minor = FALSE, 
+                border = 'partial', 
+                borderWidth = 1.5, 
+                borderColour = 'black')
 ```
 
 ### heatmaps
@@ -175,11 +220,14 @@ my_group <- column_to_rownames(my_group, var = "File")
 
 rownames(my_group) <- colnames(datMat)
 
+annoCol1<-list(Group=c(female="#FF595E",male="#1982C4"))
+
 library(pheatmap)
 pheatmap(
   as.matrix(datafilt), scale="row", annotation_col = my_group,
   width = 5, height = 8,
-   color=colorRampPalette(c("#2A9D8F", "white", "#93032E"))(50),
+  color=colorRampPalette(c("#9A54AA", "white", "#FF9F1C"))(50),
+  annotation_colors = annoCol1,
   show_rownames = FALSE, show_colnames = FALSE,
   Rowv=as.dendrogram(hclust(dist(as.matrix(datafilt)))),
   Colv=as.dendrogram(hclust(dist(t(as.matrix(datafilt))))))
@@ -228,7 +276,8 @@ immune_proteins <- filter(heatmap_dat, protein  %in% IMMUNE.human.db$human_gene_
 pheatmap(
   as.matrix(datMat), scale="row", annotation_col = my_group,
   width = 5, height = 8,
-   color=colorRampPalette(c("#2A9D8F", "white", "#93032E"))(50),
+  color=colorRampPalette(c("#9A54AA", "white", "#FF9F1C"))(50),
+  annotation_colors = annoCol1,
   show_rownames = FALSE, show_colnames = FALSE,
   Rowv=as.dendrogram(hclust(dist(as.matrix(datMat)))),
   Colv=as.dendrogram(hclust(dist(t(as.matrix(datMat))))))
@@ -236,15 +285,30 @@ pheatmap(
 ## immune proteins
 
 heatmap_dat <- rownames_to_column(datafilt, var = "protein")
-heatmap_immune <- filter(heatmap_dat, protein  %in% c('IL33', 'IL18', 'IL9', 'ILF2', 'ILF3', 'ILEU', 'DRB1', 'DRB5', 'DRB3', 'ISG15', 'JAK1', 'JAK2', 'IFI44', 'IFIT1', 'IFIT3', 'IFIT5', 'NFKB2', 'IKKB', 'JUN', 'STAT1', 'STAT2', 'STAT3', 'STAT6'))
+heatmap_innate <- filter(heatmap_dat, protein  %in% c('IRAK1', 'IRAK4', 'TAB1', 'TAB2', 'TAB3', 'TRAF6', 'NFKB1', 'NFKB2', 'ISG15', 'JAK1', 'JAK2', 'IFI44', 'IFIT1', 'IFIT3', 'IFIT5', 'IKKB', 'JUN', 'STAT1', 'STAT2', 'STAT3', 'STAT6', "IRF2", "IRF3", "IRF9", "TLR3", 'IRF2BP1', 'IRF2BP2', 'IRF2BPL'))
 
+heatmap_innate <- column_to_rownames(heatmap_innate, var = "protein")
+
+pheatmap(
+  as.matrix(heatmap_innate), scale="row", annotation_col = my_group,
+  width = 5, height = 8,
+  color=colorRampPalette(c("#9A54AA", "white", "#FF9F1C"))(50),
+  annotation_colors = annoCol1,
+  show_rownames = TRUE, show_colnames = FALSE,
+  Rowv=as.dendrogram(hclust(dist(as.matrix(heatmap_immune)))),
+  Colv=as.dendrogram(hclust(dist(t(as.matrix(heatmap_immune))))))
+```
+
+```{r}
+heatmap_immune <- filter(heatmap_dat, protein  %in% c( 'IL33', 'IL18', 'IL9', 'ILF2', 'ILF3', 'ILEU', 'DRB5', 'DRB1', 'DRB3', 'CXCL4', 'CXCL8', 'CXCR4'))
 
 heatmap_immune <- column_to_rownames(heatmap_immune, var = "protein")
 
 pheatmap(
   as.matrix(heatmap_immune), scale="row", annotation_col = my_group,
   width = 5, height = 8,
-   color=colorRampPalette(c("#2A9D8F", "white", "#93032E"))(50),
+  color=colorRampPalette(c("#9A54AA", "white", "#FF9F1C"))(50),
+  annotation_colors = annoCol1,
   show_rownames = TRUE, show_colnames = FALSE,
   Rowv=as.dendrogram(hclust(dist(as.matrix(heatmap_immune)))),
   Colv=as.dendrogram(hclust(dist(t(as.matrix(heatmap_immune))))))
@@ -347,17 +411,70 @@ ggplot(sexPlots.long, aes(x = Group, y = value, fill = Group, color=Group)) +
 ### GSEA
 
 ```{r}
+library("UniprotR")
+astro_sigprots_pos <- astro_sigprots %>% filter(logFC > 0)
+astro_sigprots_neg <- astro_sigprots %>% filter(logFC < 0)
+
+gsea_dat_pos <- rownames_to_column(astro_sigprots_pos, var = "Protein.Names")
+gsea_dat_neg <- rownames_to_column(astro_sigprots_neg, var = "Protein.Names")
+
+
+## https://github.com/Proteomicslab57357/UniprotR
+
+
+Accessions <-GetAccessionList("https://s3.amazonaws.com/csvpastebin/uploads/9571fa356c67a0c7c95e8431799a051a/Accessions.csv") 
+
+gsea_final_pos <- left_join(gsea_dat_pos, rawdata_wo_contam, by = "Protein.Names") %>% select(colnames(gsea_dat_pos), "Protein.Ids")
+
+gsea_final_neg <- left_join(gsea_dat_neg, rawdata_wo_contam, by = "Protein.Names") %>% select(colnames(gsea_dat_neg), "Protein.Ids")
+
+GeneOntologyObj_m <- GetProteinGOInfo(gsea_final_pos$Protein.Ids) 
+#Plot Biological process information top 10 go terms  
+PlotGOBiological(GeneOntologyObj_m) 
+
+GeneOntologyObj_f <- GetProteinGOInfo(gsea_final_neg$Protein.Ids) 
+#Plot Biological process information top 10 go terms  
+PlotGOBiological(GeneOntologyObj_f) 
+
+
+# #Plot molecular function information top 20 go terms
+# Plot.GOMolecular(GeneOntologyObj, Top = 20)
+# #Plot subcellualr localization information 
+# Plot.GOSubCellular(GeneOntologyObj) 
+# #Combine Gene ontology plots into one plot 
+# PlotGoInfo(GeneOntologyObj)
+
+
+# GETSeqFastaUniprot(Accessions = gsea_final_pos[1:20,]$Protein.Ids, FileName = "Acclist")
+
+Enrichment.REAC(gsea_final_pos$Protein.Ids, top = 20)
+Enrichment.REAC(gsea_final_neg$Protein.Ids, top = 20)
+
+Pathway.Enr(gsea_final_pos$Protein.Ids)
+Pathway.Enr(gsea_final_neg$Protein.Ids)
+
+
+pathology_obj <- GetPathology_Biotech(gsea_final_neg[1:20,]$Protein.Ids)
+diseases <- Get.diseases(pathology_obj)           
+diseases
+                                   
+
+
+```
+
+```{r}
 #https://biit.cs.ut.ee/gprofiler/gost
 library(GOplot)
 astro_go <- read_tsv(file='../data/astrocyte_brain_gene_annotation.tsv')
 astro_gprofiler_m <- read_csv(file='../data/20240226_male_gProfiler_hsapiens_5-11-2024_6-39-03 PM__intersections.csv')
 astro_gprofiler_f <- read_csv(file='../data/20240226_female_gProfiler_hsapiens_5-11-2024_6-05-04 PM__intersections.csv')
-astro_gprofiler <- read_csv(file='../data/20240226_gprofiler_sig.csv')
+astro_sig_gprofiler <- read_csv(file='../data/20240226_gprofiler_sig.csv')
+astro_gprofiler <- read_csv(file='../data/20240226_complete_gprofiler_hsapiens.csv')
 
-EC$david
+
 
 #GO analysis for female
-female_sigprots <- rownames_to_column(female_sigprots, var = "gene")
+female_sigprots <- rownames_to_column(female_sigprots, var = "ID")
 female_go <- filter(female_sigprots, gene  %in% astro_go$gene) 
 
 female_go <- merge(female_go, astro_go, by = "gene")
@@ -371,61 +488,6 @@ male_go <- filter(male_sigprots, ID  %in% astro_go$gene)
 # astro_circ_m <- circle_dat(astro_gprofiler_m, male_sigprots)
 # astro_circ_sig_m <- filter(astro_circ_m, adj_pval < 0.05)
 # astro_circ_top10 <- top_n(astro_circ_sig_m, 10, adj_pval)
-```
-
-```{r}
-library("UniprotR")
-```
-
-```{r}
-
-astro_sigprots_pos <- astro_sigprots %>% filter(logFC > 0)
-astro_sigprots_neg <- astro_sigprots %>% filter(logFC < 0)
-
-gsea_dat_pos <- rownames_to_column(astro_sigprots_pos, var = "Protein.Names")
-gsea_dat_neg <- rownames_to_column(astro_sigprots_neg, var = "Protein.Names")
-
-Accessions <-GetAccessionList("https://s3.amazonaws.com/csvpastebin/uploads/9571fa356c67a0c7c95e8431799a051a/Accessions.csv") 
-
-
-
-gsea_final_pos <- left_join(gsea_dat_pos, rawdata_wo_contam, by = "Protein.Names") %>% select(colnames(gsea_dat_pos), "Protein.Ids")
-
-gsea_final_neg <- left_join(gsea_dat_neg, rawdata_wo_contam, by = "Protein.Names") %>% select(colnames(gsea_dat_neg), "Protein.Ids")
-
-GeneOntologyObj <- GetProteinGOInfo(gsea_final_pos[1:20,]$Protein.Ids) 
-#Plot Biological process information top 10 go terms  
-PlotGOBiological(GeneOntologyObj, Top = 10) 
-#Plot molecular function information top 20 go terms
-Plot.GOMolecular(GeneOntologyObj, Top = 20)
-#Plot subcellualr localization information 
-Plot.GOSubCellular(GeneOntologyObj) 
-#Combine Gene ontology plots into one plot 
-PlotGoInfo(GeneOntologyObj)
-#Handy visualization for publi
-
-write_csv(gsea_final, "sig_prots_20240502.csv")
-
-GETSeqFastaUniprot(Accessions = gsea_final[1:20,]$Protein.Ids, FileName = "Acclist")
-
-Enrichment.REAC(gsea_final_pos$Protein.Ids, top = 20)
-Enrichment.REAC(gsea_final_neg$Protein.Ids, top = 20)
-
-Pathway.Enr(gsea_final[1:100,]$Protein.Ids)
-
-
-pathology_obj <- GetPathology_Biotech(gsea_final[1:20,]$Protein.Ids)
-diseases <- Get.diseases(pathology_obj)           
-diseases
-                                   
-
-
-```
-
-```{r}
-Enrichment.REAC(gsea_final_pos$Protein.Ids, top = 20)
-Enrichment.REAC(gsea_final_neg$Protein.Ids, top = 20)
-
 ```
 
 ### GOPlots
@@ -445,17 +507,20 @@ You will see all of those in action here below:
 We need `gprofiler` and the `astro_sigprots`
 
 ```{r}
-astro_gprofiler <- read_csv(file='../data/20240226_gprofiler_sig.csv')
+astro_sig_gprofiler <- read_csv(file='../data/20240226_gprofiler_sig.csv')
+astro_gprofiler <- read_csv(file='../data/20240226_complete_gprofiler_hsapiens.csv')
 astro_sigprots_names <- rownames_to_column(astro_sigprots, var = "ID")
 ```
 
 #### GOBar
 
 ```{r}
-astro_circ <- circle_dat(astro_gprofiler, astro_sigprots_names)
+astro_circ <- circle_dat(astro_gprofiler, sigprots)
+astro_circ_f <- circle_dat(astro_gprofiler_f, female_sigprots)
 
 ## Filtering those with `adj_pval` == 1, cause it's noise that clogs up the plot
-astro_circ <- subset(astro_circ, adj_pval < 1)
+astro_circ <- subset(astro_circ, adj_pval < 0.00001)
+astro_circ_f <- subset(astro_circ_f, adj_pval < 0.005)
 ```
 
 ```{r}
@@ -480,7 +545,8 @@ GOBubble(astro_circ, labels = 1)
 ##      chord <- chord_dat(circ, EC$genes, EC$process)
 
 chord <- chord_dat(astro_circ, unique(astro_circ$genes), unique(astro_circ$term))
+chord_f <- chord_dat(astro_circ_f, unique(astro_circ_f$genes), unique(astro_circ_f$term))
 
-GOHeat(chord, nlfc = 0) # 0 for plotting counts
+GOHeat(chord_f, nlfc = 0) # 0 for plotting counts
 GOHeat(chord, nlfc = 1) # 1 for plotting logFC
 ```

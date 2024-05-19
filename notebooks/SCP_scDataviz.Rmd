@@ -1,0 +1,361 @@
+---
+title: "SCP_scDataviz"
+author: "Lucy"
+date: "2024-05-15"
+output: html_document
+---
+
+```{r}
+# BiocManager::install('scDataviz')
+library(scDataviz)
+library(tidyverse)
+```
+
+### import data
+
+```{r}
+#protein data - male
+scp_male <- read_tsv(file='/Users/lucychi/Desktop/SCP_data/20240404_male_astrocytes_XL.tsv')
+
+#protein data - female1
+scp_femaleL <- read_tsv(file='/Users/lucychi/Desktop/SCP_data/20240413_female_astrocytes_L.tsv')
+
+#protein data - female2
+scp_femaleXL <- read_tsv(file='/Users/lucychi/Desktop/SCP_data/20240413_female_astrocytes_XL.tsv')
+
+#scp data
+scp_data <- scp_male %>%
+          left_join(scp_femaleL, by = "Protein.Group") %>%
+          left_join(scp_femaleXL, by = "Protein.Group")
+
+
+met <- read_csv('/Users/lucychi/Desktop/SCP_data/20240413_female_astrocytes_XL_metadata.csv')
+#meta data
+astro229E_metadata <- read_tsv(file = '../data/20240312_primary_astrocyte_w229E_bulk_SCP_metadata.tsv')
+```
+
+```{r}
+scp_male_met <- read_csv(file = '/Users/lucychi/Desktop/SCP_data/20240404_male_astrocytes_XL_metadata.csv')
+
+scp_female_metL <- read_csv(file = '/Users/lucychi/Desktop/SCP_data/20240413_female_astrocytes_L_metadata.csv')
+scp_female_metL <- read_csv(file = '/Users/lucychi/Desktop/SCP_data/20240413_female_astrocytes_XL_metadata.csv')
+
+#merge all files
+scp_met <- rbind(scp_male_met, scp_female_metL, scp_female_metXL)
+scp_met <- column_to_rownames(scp_met, var = "Sample Name")
+scp_met <- t(scp_met)
+colnames(scp_met) <- make.names(colnames(scp_met))
+scp_met <- t(scp_met)
+```
+
+### data filter and pre-processing
+
+```{r}
+#1. remove contamination
+scp_remove_contam <- scp_data[- grep("CONT", scp_data$Protein.Group),]
+
+#2. remove the "_HUMAN" off the Protein Names
+scp_remove_contam$Protein.Names.x <- gsub("_HUMAN", "", scp_remove_contam$Protein.Names.x)
+
+scp_remove_contam <- column_to_rownames(scp_remove_contam, var = "Protein.Names.x")
+
+#3. remove the low quality samples (too little or too many proteins identified)
+ #count the number of non-NAs
+non_na_counts <- colSums(!is.na(scp_remove_contam))
+#print(non_na_counts)
+
+ #identify columns with at least 1000 non-NA values
+columns_to_keep <- names(non_na_counts[non_na_counts >= 600 & non_na_counts <= 3500])
+
+ #subset the data frame to keep only those columns
+scp_filt <- scp_remove_contam[, columns_to_keep]
+
+#4. remove the rows with 0 protein counts
+count <- rowSums(is.na(scp_filt))
+scp_filt <- data.frame(cbind(scp_filt, "Count" = count))
+scp_filt <- subset(scp_filt, Count = 0)
+scp_filt <- subset(scp_filt, select = -c(Count))
+
+protein_filt_counts <- colSums(!is.na(scp_filt))
+
+#5. log transform data
+  #replace NAs with 1
+scp_filt[is.na(scp_filt)] <- 1
+scp_log <- log2(scp_filt)
+
+#6. merge log transform data with metadata
+scp_met <- rownames_to_column(as.data.frame(scp_met), var="file")
+scp_log_for_merging <- rownames_to_column(as.data.frame(scp_log), var="file")
+
+scp_full <- inner_join(scp_met, scp_log_for_merging, by="file")
+#write.csv(scp_full, file = "20240518_scp_full.csv")
+```
+
+### box plots
+
+```{r}
+counts_per_sample <- data.frame(
+  counts = protein_filt_counts,
+  sex = c(rep("male", 109), rep("female", length(protein_filt_counts)-109))
+) 
+
+ggplot(counts_per_sample, aes(x=sex, y=counts, color=sex)) + 
+  geom_jitter(position=position_jitter(0.1), alpha=0.5) + 
+  geom_boxplot(width=0.1) + 
+  ylim(c(0, 4000)) +
+  scale_color_manual(values = c(female = "#FF595E",
+                                male = "#1982C4"))
+```
+
+### convert data format for scDataviz
+
+```{r}
+scp_log <- t(scp_log)
+
+metadata <- data.frame(
+  group = c(rep('male', 109), rep("female", nrow(scp_log)-109)),
+  row.names = rownames(scp_log),
+  stringsAsFactors = FALSE)
+
+sce <- importData(scp_log,
+    assayname = 'normcounts',
+    metadata = metadata)
+
+```
+
+### UMAP
+
+```{r}
+sce_umap <- performUMAP(sce, assay = "normcounts")
+
+metadataPlot(sce_umap,
+colby = 'group',
+colkey = c(male = '#1982C4', female = '#FF595E'),
+title = 'UMAP for primary astrocytes',
+subtitle = ' ',
+legendLabSize = 16,
+axisLabSize = 20,
+titleLabSize = 20,
+subtitleLabSize = 16,
+captionLabSize = 16)
+```
+
+#### filter male data for UMAP
+
+```{r}
+#male
+
+#male data
+scp_m <- scp_log[1:109, ]
+
+#male metadata
+metadata_m <- data.frame(
+  group = rep('male', nrow(scp_m)),
+  row.names = rownames(scp_m),
+  stringsAsFactors = FALSE)
+
+#sce for male
+sce_m <- importData(scp_m,
+    assayname = 'normcounts',
+    metadata = metadata_m)
+
+sce_umap_m <- performUMAP(sce_m, assay = "normcounts")
+
+contourPlot(sce_umap_m,
+    reducedDim = 'UMAP',
+    bins = 150,
+    subtitle = 'UMAP for male astrocytes',
+    legendLabSize = 18,
+    axisLabSize = 22,
+    titleLabSize = 22,
+    subtitleLabSize = 18,
+    captionLabSize = 18)
+
+metadataPlot(sce_umap_m,
+colby = 'group',
+colkey = c(male = '#1982C4', female = '#FF595E'),
+title = 'UMAP for male astrocytes',
+subtitle = ' ',
+legendLabSize = 16,
+axisLabSize = 20,
+titleLabSize = 20,
+subtitleLabSize = 16,
+captionLabSize = 16)
+```
+
+#### filter female data for UMAP
+
+```{r}
+#female
+
+#female data
+scp_f <- scp_log[110:462, ]
+
+#female metadata
+metadata_f <- data.frame(
+  group = rep('female', nrow(scp_f)),
+  row.names = rownames(scp_f),
+  stringsAsFactors = FALSE)
+
+#sce for female
+sce_f <- importData(scp_f,
+    assayname = 'normcounts',
+    metadata = metadata_f)
+
+sce_umap_f <- performUMAP(sce_f, assay = "normcounts")
+
+contourPlot(sce_umap_f,
+    reducedDim = 'UMAP',
+    bins = 150,
+    subtitle = 'UMAP for female astrocytes',
+    legendLabSize = 18,
+    axisLabSize = 22,
+    titleLabSize = 22,
+    subtitleLabSize = 18,
+    captionLabSize = 18)
+
+metadataPlot(sce_umap_f,
+colby = 'group',
+colkey = c(male = '#1982C4', female = '#FF595E'),
+title = 'UMAP for female astrocytes',
+subtitle = ' ',
+legendLabSize = 16,
+axisLabSize = 20,
+titleLabSize = 20,
+subtitleLabSize = 16,
+captionLabSize = 16)
+ 
+```
+
+### marker expression
+
+```{r}
+marker_1 <- c('DDX3X', 'DDX3Y')
+marker_2 <- c('TBA1C', 'GFAP')
+
+markerExpression(sce_umap,
+    markers = marker_1,
+    assay = "normcounts",
+    subtitle = 'UMAP performed on expression values',
+    nrow = 1, ncol = 6,
+    legendKeyHeight = 1.0,
+    legendLabSize = 18,
+    stripLabSize = 22,
+     pointSize = 1,
+    axisLabSize = 22,
+    titleLabSize = 22,
+    subtitleLabSize = 18,
+    captionLabSize = 18, alpha = 1,
+    col=c("#9A54AA", "orange"))
+
+markerExpression(sce_umap,
+    markers = marker_2,
+    assay = "normcounts",
+    subtitle = ' ',
+    nrow = 1, ncol = 6,
+    legendKeyHeight = 1.0,
+    legendLabSize = 18,
+    stripLabSize = 22,
+     pointSize = 1,
+    axisLabSize = 22,
+    titleLabSize = 22,
+    subtitleLabSize = 18,
+    captionLabSize = 18, alpha = 1,
+    col=c("#9A54AA", "orange"))
+```
+
+#### female
+
+```{r}
+marker_f1 <- c('UNC13C', 'AGT', 'FRZB', 'ASCL1', 'OGT', 'FAM107A', 'GFAP')
+
+markerExpression(sce_umap_f,
+    markers = marker_f1,
+    assay = "normcounts",
+    subtitle = 'UMAP performed on expression values',
+    nrow = 1, ncol = 6,
+    legendKeyHeight = 1.0,
+    legendLabSize = 18,
+    stripLabSize = 22,
+     pointSize = 1,
+    axisLabSize = 22,
+    titleLabSize = 22,
+    subtitleLabSize = 18,
+    captionLabSize = 18, alpha = 1,
+    col=c("#9A54AA", "orange"))
+```
+
+### PCA
+
+```{r}
+#BiocManager::install("PCAtools")
+library(PCAtools)
+#remotes::install_version("matrixStats", version="1.1.0")
+
+p <- pca(assay(sce, "normcounts"), metadata = metadata(sce))
+
+
+biplot(p,
+    x = 'PC1', y = 'PC2',
+    lab = NULL,
+    xlim = c(min(p$rotated[,'PC1'])-1, max(p$rotated[,'PC1'])+1),
+    ylim = c(min(p$rotated[,'PC2'])-1, max(p$rotated[,'PC2'])+1),
+    pointSize = 1.0,
+    colby = 'group',
+    colkey=c(female="#FF595E", male="#1982C4"),
+    legendPosition = 'right',
+    title = 'PCA Single Astrocytes: Male vs Female')
+
+  elbow <- findElbowPoint(p$variance)
+  
+reducedDim(sce, 'PCA') <- p$rotated
+    sce <- performUMAP(sce, assay="normcounts",reducedDim = 'PCA', dims = c(1:11))
+    
+    markerExpression(sce,
+    markers = marker_1,
+    reducedDim = 'UMAP_PCA',
+    assay = "normcounts",
+    subtitle = ' ',
+    nrow = 1, ncol = 6,
+    col = c('red', 'darkblue'),
+    legendKeyHeight = 1.0,
+    legendLabSize = 18,
+    stripLabSize = 22,
+    axisLabSize = 22,
+    titleLabSize = 22,
+    subtitleLabSize = 18,
+    captionLabSize = 18)
+
+```
+
+```{r}
+  sce_umap_m <- clusKNN(sce_umap_m,
+    k.param = 10,
+    prune.SNN = 1/15,
+    resolution = 0.01,
+    algorithm = 2,
+    verbose = FALSE)
+
+  
+   plotClusters(sce_umap_m,
+    clusterColname = 'Cluster',
+    labSize = 7.0,
+    subtitle = 'UMAP performed on expression values',
+    caption = paste0('Note: clusters / communities identified via',
+      '\nLouvain algorithm with multilevel refinement'),
+    axisLabSize = 20,
+    titleLabSize = 20,
+    subtitleLabSize = 16,
+    captionLabSize = 16)
+   
+   
+   
+     markerExpressionPerCluster(sce_umap_m,
+                                assay = "normcounts",
+    caption = 'Cluster assignments based on UMAP performed on expression values',
+    stripLabSize = 22,
+    axisLabSize = 22,
+    titleLabSize = 22,
+    subtitleLabSize = 18,
+    captionLabSize = 18)
+```
